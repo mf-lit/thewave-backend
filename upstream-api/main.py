@@ -225,6 +225,59 @@ def _get_from_cache(key: str) -> tuple[dict, float] | None:
     return None
 
 
+def _add_side_to_availability(data: dict) -> dict:
+    """
+    Add 'side' field to availabilityPerProduct objects based on code suffix.
+    
+    Args:
+        data: Response data dictionary
+    
+    Returns:
+        dict: Response data with side fields added
+    """
+    if not isinstance(data, dict) or "days" not in data:
+        return data
+    
+    days = data.get("days", [])
+    if not isinstance(days, list):
+        return data
+    
+    for day in days:
+        if not isinstance(day, dict) or "performances" not in day:
+            continue
+        
+        performances = day.get("performances", [])
+        if not isinstance(performances, list):
+            continue
+        
+        for performance in performances:
+            if not isinstance(performance, dict) or "availabilityPerProduct" not in performance:
+                continue
+            
+            availability_per_product = performance.get("availabilityPerProduct")
+            # Handle both single object and array cases
+            if isinstance(availability_per_product, list):
+                for item in availability_per_product:
+                    if isinstance(item, dict) and "code" in item:
+                        code = item.get("code", "")
+                        if code.endswith("-L"):
+                            item["side"] = "left"
+                        elif code.endswith("-R"):
+                            item["side"] = "right"
+                        else:
+                            item["side"] = "none"
+            elif isinstance(availability_per_product, dict) and "code" in availability_per_product:
+                code = availability_per_product.get("code", "")
+                if code.endswith("-L"):
+                    availability_per_product["side"] = "left"
+                elif code.endswith("-R"):
+                    availability_per_product["side"] = "right"
+                else:
+                    availability_per_product["side"] = "none"
+    
+    return data
+
+
 def _store_in_cache(key: str, data: dict) -> None:
     """
     Store data in cache with current timestamp and expiration time.
@@ -272,6 +325,8 @@ def calendar_endpoint():
         cached_result = _get_from_cache(cache_key)
         if cached_result is not None:
             cached_data, expires = cached_result
+            # Add side field to availabilityPerProduct
+            cached_data = _add_side_to_availability(cached_data)
             # Add expires field - handle both dict and list responses
             if isinstance(cached_data, dict):
                 response_with_expires = {**cached_data, "expires": int(expires)}
@@ -283,8 +338,10 @@ def calendar_endpoint():
     # Fetch from upstream API
     try:
         response_data = get_calendar(date_from, number_of_days)
-        # Store in cache
+        # Store original data in cache (without side field)
         _store_in_cache(cache_key, response_data)
+        # Add side field to availabilityPerProduct
+        response_data = _add_side_to_availability(response_data)
         # Calculate expiration time for this response
         expires = time.time() + CACHE_TTL_SECONDS
         # Add expires field - handle both dict and list responses
