@@ -258,6 +258,102 @@ class DynamoDBStorage:
         # Convert Decimal types to native Python types
         return [self._convert_decimals(item) for item in notifications]
 
+    def ensure_clients_table_exists(self, table_name: str = "waveform-clients"):
+        """Create the clients table if it doesn't exist.
+
+        Args:
+            table_name: Name of the clients table
+        """
+        try:
+            clients_table = self.dynamodb.Table(table_name)
+            # Try to describe the table to check if it exists
+            clients_table.meta.client.describe_table(TableName=table_name)
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "ResourceNotFoundException":
+                # Table doesn't exist, create it
+                clients_table = self.dynamodb.create_table(
+                    TableName=table_name,
+                    KeySchema=[{"AttributeName": "client_id", "KeyType": "HASH"}],
+                    AttributeDefinitions=[
+                        {"AttributeName": "client_id", "AttributeType": "S"}
+                    ],
+                    BillingMode="PAY_PER_REQUEST",
+                )
+                # Wait for table to be created
+                clients_table.wait_until_exists()
+
+    def create_or_update_client_token(
+        self, client_id: str, fcm_token: str, table_name: str = "waveform-clients"
+    ) -> Dict[str, Any]:
+        """Create or update FCM token for a client.
+
+        Args:
+            client_id: UUID of the client
+            fcm_token: Firebase Cloud Messaging token
+            table_name: Name of the clients table
+
+        Returns:
+            Client record with fcm_token and updated_at
+        """
+        self.ensure_clients_table_exists(table_name)
+        clients_table = self.dynamodb.Table(table_name)
+
+        now = datetime.utcnow().isoformat()
+
+        item = {
+            "client_id": client_id,
+            "fcm_token": fcm_token,
+            "updated_at": now,
+        }
+
+        clients_table.put_item(Item=item)
+        return item
+
+    def get_client_token(
+        self, client_id: str, table_name: str = "waveform-clients"
+    ) -> Optional[str]:
+        """Get FCM token for a client.
+
+        Args:
+            client_id: UUID of the client
+            table_name: Name of the clients table
+
+        Returns:
+            FCM token string if found, None otherwise
+        """
+        self.ensure_clients_table_exists(table_name)
+        clients_table = self.dynamodb.Table(table_name)
+
+        try:
+            response = clients_table.get_item(Key={"client_id": client_id})
+            item = response.get("Item")
+            if item:
+                return item.get("fcm_token")
+            return None
+        except ClientError:
+            return None
+
+    def delete_client_token(
+        self, client_id: str, table_name: str = "waveform-clients"
+    ) -> bool:
+        """Delete FCM token for a client.
+
+        Args:
+            client_id: UUID of the client
+            table_name: Name of the clients table
+
+        Returns:
+            True if deleted, False if not found
+        """
+        self.ensure_clients_table_exists(table_name)
+        clients_table = self.dynamodb.Table(table_name)
+
+        try:
+            clients_table.delete_item(Key={"client_id": client_id})
+            return True
+        except ClientError:
+            return False
+
     def get_notifications_by_performance_ak(
         self, performance_ak: str
     ) -> List[Dict[str, Any]]:

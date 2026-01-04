@@ -16,6 +16,7 @@ from src.utils.calendar import (
     find_performance_by_ak,
     get_performance_title,
 )
+from src.utils.fcm import validate_fcm_token
 
 bp = Blueprint("notifications", __name__)
 storage = DynamoDBStorage()
@@ -194,5 +195,112 @@ def delete_notification(client_id: str, notification_id: str):
     except Exception as e:
         response_data = {"error": f"Failed to delete notification: {str(e)}"}
         log_response(f"DELETE /clients/{client_id}/notifications/{notification_id}", response_data, 500)
+        return jsonify(response_data), 500
+
+
+@bp.route("/clients/<client_id>/fcm-token", methods=["PUT"])
+def create_or_update_fcm_token(client_id: str):
+    """Create or update FCM token for a client."""
+    # Log request
+    data = request.get_json()
+    logger.info(
+        f"PUT /clients/{client_id}/fcm-token - Request body: {json.dumps(data, indent=2) if data else 'None'}"
+    )
+
+    # Validate client_id
+    if not validate_uuid(client_id):
+        response_data = {"error": "Invalid client_id format"}
+        log_response(f"PUT /clients/{client_id}/fcm-token", response_data, 400)
+        return jsonify(response_data), 400
+
+    # Parse and validate request body
+    if not data:
+        response_data = {"error": "Request body is required"}
+        log_response(f"PUT /clients/{client_id}/fcm-token", response_data, 400)
+        return jsonify(response_data), 400
+
+    fcm_token = data.get("fcm_token")
+    if not fcm_token:
+        response_data = {"error": "fcm_token is required"}
+        log_response(f"PUT /clients/{client_id}/fcm-token", response_data, 400)
+        return jsonify(response_data), 400
+
+    # Validate FCM token format
+    is_valid, error_msg = validate_fcm_token(fcm_token)
+    if not is_valid:
+        response_data = {"error": error_msg}
+        log_response(f"PUT /clients/{client_id}/fcm-token", response_data, 400)
+        return jsonify(response_data), 400
+
+    # Create or update token
+    try:
+        storage.ensure_clients_table_exists()
+        client_record = storage.create_or_update_client_token(client_id, fcm_token)
+        response_data = {
+            "message": "FCM token saved successfully",
+            "updated_at": client_record["updated_at"],
+        }
+        log_response(f"PUT /clients/{client_id}/fcm-token", response_data, 200)
+        return jsonify(response_data), 200
+    except Exception as e:
+        response_data = {"error": f"Failed to save FCM token: {str(e)}"}
+        log_response(f"PUT /clients/{client_id}/fcm-token", response_data, 500)
+        return jsonify(response_data), 500
+
+
+@bp.route("/clients/<client_id>/fcm-token", methods=["GET"])
+def get_fcm_token(client_id: str):
+    """Get FCM token for a client (existence check only)."""
+    logger.info(f"GET /clients/{client_id}/fcm-token - Request")
+
+    # Validate client_id
+    if not validate_uuid(client_id):
+        response_data = {"error": "Invalid client_id format"}
+        log_response(f"GET /clients/{client_id}/fcm-token", response_data, 400)
+        return jsonify(response_data), 400
+
+    try:
+        storage.ensure_clients_table_exists()
+        fcm_token = storage.get_client_token(client_id)
+        if fcm_token:
+            # Return confirmation that token exists, but not the actual token for security
+            response_data = {"has_token": True}
+            log_response(f"GET /clients/{client_id}/fcm-token", response_data, 200)
+            return jsonify(response_data), 200
+        else:
+            response_data = {"error": "FCM token not found"}
+            log_response(f"GET /clients/{client_id}/fcm-token", response_data, 404)
+            return jsonify(response_data), 404
+    except Exception as e:
+        response_data = {"error": f"Failed to get FCM token: {str(e)}"}
+        log_response(f"GET /clients/{client_id}/fcm-token", response_data, 500)
+        return jsonify(response_data), 500
+
+
+@bp.route("/clients/<client_id>/fcm-token", methods=["DELETE"])
+def delete_fcm_token(client_id: str):
+    """Delete FCM token for a client."""
+    logger.info(f"DELETE /clients/{client_id}/fcm-token - Request")
+
+    # Validate client_id
+    if not validate_uuid(client_id):
+        response_data = {"error": "Invalid client_id format"}
+        log_response(f"DELETE /clients/{client_id}/fcm-token", response_data, 400)
+        return jsonify(response_data), 400
+
+    try:
+        storage.ensure_clients_table_exists()
+        deleted = storage.delete_client_token(client_id)
+        if deleted:
+            response_data = {"message": "FCM token deleted successfully"}
+            log_response(f"DELETE /clients/{client_id}/fcm-token", response_data, 200)
+            return jsonify(response_data), 200
+        else:
+            response_data = {"error": "FCM token not found"}
+            log_response(f"DELETE /clients/{client_id}/fcm-token", response_data, 404)
+            return jsonify(response_data), 404
+    except Exception as e:
+        response_data = {"error": f"Failed to delete FCM token: {str(e)}"}
+        log_response(f"DELETE /clients/{client_id}/fcm-token", response_data, 500)
         return jsonify(response_data), 500
 
