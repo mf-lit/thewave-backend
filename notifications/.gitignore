@@ -56,6 +56,7 @@ logs/
 *.json
 !response.json
 !pyproject.toml
+google_application_credentials.json
 
 # Local development
 localstack/
