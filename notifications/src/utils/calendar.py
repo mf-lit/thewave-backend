@@ -1,6 +1,5 @@
 """Calendar API client for fetching session availability data."""
 import os
-from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 import requests
@@ -25,6 +24,46 @@ def fetch_calendar_data(date_from: str, number_of_days: int) -> Dict:
     response = requests.get(base_url, params=params, timeout=30)
     response.raise_for_status()
     return response.json()
+
+
+def fetch_calendar_data_for_dates(dates: List[str]) -> Dict:
+    """Fetch calendar data for specific dates only.
+    
+    Makes individual API calls for each date to minimize data fetched.
+    Merges the results into a single calendar data structure.
+
+    Args:
+        dates: List of dates in YYYY-MM-DD format to fetch
+
+    Returns:
+        Calendar data dictionary with days and performances for the specified dates
+
+    Raises:
+        requests.RequestException: If any API request fails
+    """
+    if not dates:
+        return {"days": []}
+    
+    # Remove duplicates and sort
+    unique_dates = sorted(set(dates))
+    
+    # Fetch each date individually (numberOfDays=1)
+    all_days = []
+    base_url = os.getenv("CALENDAR_API_URL", "http://localhost:5000/calendar")
+    
+    for date in unique_dates:
+        params = {"dateFrom": date, "numberOfDays": 1}
+        response = requests.get(base_url, params=params, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        
+        # Extract the day data for this specific date
+        days = data.get("days", [])
+        for day in days:
+            if day.get("date") == date:
+                all_days.append(day)
+    
+    return {"days": all_days}
 
 
 def find_performance_by_date_time_side(
@@ -121,43 +160,18 @@ def get_performance_title(performance: Dict) -> str:
     return fields.get("title", "")
 
 
-def get_date_range_for_notifications(
-    notifications: List[Dict], days_ahead: int = 30
-) -> tuple[str, int]:
-    """Calculate the date range needed to check all notifications.
-
+def get_notification_dates(notifications: List[Dict]) -> List[str]:
+    """Extract unique dates from notifications.
+    
     Args:
         notifications: List of notification dictionaries
-        days_ahead: Maximum days ahead to check (default 30)
-
+        
     Returns:
-        Tuple of (date_from, number_of_days)
+        List of unique dates in YYYY-MM-DD format
     """
     if not notifications:
-        # Default to checking from today
-        today = datetime.now().date()
-        return today.isoformat(), 1
-
-    # Find the earliest and latest dates
-    dates = [n["date"] for n in notifications if "date" in n]
-    if not dates:
-        today = datetime.now().date()
-        return today.isoformat(), 1
-
-    min_date = min(dates)
-    max_date = max(dates)
-
-    # Parse dates
-    min_dt = datetime.strptime(min_date, "%Y-%m-%d").date()
-    max_dt = datetime.strptime(max_date, "%Y-%m-%d").date()
-    today = datetime.now().date()
-
-    # Start from today or the earliest notification date, whichever is earlier
-    date_from = min(today, min_dt)
-
-    # Calculate number of days needed
-    end_date = max(today + timedelta(days=days_ahead), max_dt)
-    number_of_days = (end_date - date_from).days + 1
-
-    return date_from.isoformat(), number_of_days
+        return []
+    
+    dates = [n["date"] for n in notifications if "date" in n and n["date"]]
+    return sorted(set(dates))
 

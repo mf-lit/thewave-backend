@@ -6,9 +6,9 @@ from typing import Dict, List
 from src.storage.dynamodb import DynamoDBStorage
 from src.utils.calendar import (
     extract_availability_by_side,
-    fetch_calendar_data,
+    fetch_calendar_data_for_dates,
     find_performance_by_ak,
-    get_date_range_for_notifications,
+    get_notification_dates,
 )
 
 logger = logging.getLogger(__name__)
@@ -96,13 +96,20 @@ def check_availability(storage: DynamoDBStorage) -> None:
         if not notifications:
             return
 
-        # Calculate date range needed
-        date_from, number_of_days = get_date_range_for_notifications(notifications)
-        logger.info(f"Fetching calendar data from {date_from} for {number_of_days} days")
+        # Get unique dates from notifications - only fetch these specific dates
+        unique_dates = get_notification_dates(notifications)
+        
+        if not unique_dates:
+            logger.warning("No valid dates found in notifications")
+            return
+        
+        logger.info(
+            f"Fetching calendar data for {len(unique_dates)} specific date(s): {', '.join(unique_dates)}"
+        )
 
-        # Fetch calendar data
+        # Fetch calendar data only for the specific dates that have notifications
         try:
-            calendar_data = fetch_calendar_data(date_from, number_of_days)
+            calendar_data = fetch_calendar_data_for_dates(unique_dates)
         except Exception as e:
             logger.error(f"Failed to fetch calendar data: {e}")
             return
@@ -190,6 +197,7 @@ def check_availability(storage: DynamoDBStorage) -> None:
                         notification,
                         notification.get("client_id"),
                         message,
+                        current_availability,
                     )
                     logger.info(
                         f"Sent notification for {notification.get('notification_id')}: {message}"

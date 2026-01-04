@@ -1,4 +1,5 @@
 """Notification sender via Firebase Cloud Messaging."""
+import json
 import os
 import logging
 from typing import Dict, Optional
@@ -65,7 +66,7 @@ def _initialize_firebase():
         return None
 
 
-def send_notification(notification: Dict, client_id: str, message: str):
+def send_notification(notification: Dict, client_id: str, message: str, availability: int):
     """Send a notification to a client via FCM.
 
     Retrieves the client's FCM token and sends a push notification via Firebase.
@@ -74,6 +75,7 @@ def send_notification(notification: Dict, client_id: str, message: str):
         notification: Notification dictionary
         client_id: UUID of the client to notify
         message: Notification message
+        availability: Current availability count for the session
     """
     # Initialize Firebase if not already done
     firebase_app = _initialize_firebase()
@@ -100,14 +102,19 @@ def send_notification(notification: Dict, client_id: str, message: str):
     # Prepare data payload for app processing
     # FCM data payload values must be strings
     data_payload = {
-        "client_id": str(client_id),
-        "notification_id": str(notification.get("notification_id", "")),
         "performance_ak": str(notification.get("performance_ak", "")),
         "date": str(notification.get("date", "")),
         "time": str(notification.get("time", "")),
         "side": str(notification.get("side", "")),
+        "session_title": str(session_title),
+        "availability": str(availability),
         "notification_type": str(notification.get("notification_type", "")),
     }
+
+    # Log the payload being sent
+    logger.info(
+        f"Sending FCM notification to client {client_id} with payload: {json.dumps(data_payload, indent=2)}"
+    )
 
     # Create FCM message with both notification and data payloads
     fcm_message = messaging.Message(

@@ -42,8 +42,8 @@ def main():
         logger.error(f"Failed to initialize DynamoDB table: {e}")
         sys.exit(1)
 
-    # Schedule the check to run every 10 minutes
-    schedule.every(10).minutes.do(run_check)
+    # Schedule the check to run every 3 minutes
+    schedule.every(3).minutes.do(run_check)
 
     # Run an initial check
     logger.info("Running initial availability check")
@@ -54,7 +54,7 @@ def main():
     signal.signal(signal.SIGTERM, signal_handler)
 
     # Main loop
-    logger.info("Daemon started, checking every 10 minutes")
+    logger.info("Daemon started, checking every 3 minutes")
     while True:
         schedule.run_pending()
         time.sleep(60)  # Check every minute for pending scheduled tasks
