@@ -2,6 +2,9 @@ import os
 import time
 import logging
 import re
+import json
+import threading
+from pathlib import Path
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -15,10 +18,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Test mode configuration (enabled when TEST_MODE env var is set)
+TEST_MODE = os.getenv("TEST_MODE", "").lower() in ("true", "1", "yes")
+
 # In-memory cache: {cache_key: {"data": dict, "timestamp": float, "expires": float}}
 _cache: dict[str, dict] = {}
 # Water temperature cache: {cache_key: {"data": float, "timestamp": float, "expires": float}}
 _water_temp_cache: dict[str, dict] = {}
+# Lock to prevent concurrent water temperature scraping
+_water_temp_lock = threading.Lock()
 
 # Cache TTL in seconds (default: 600, configurable via CACHE_TTL_SECONDS env var)
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "600"))
@@ -225,6 +233,92 @@ def _get_from_cache(key: str) -> tuple[dict, float] | None:
     return None
 
 
+def _load_test_data() -> dict:
+    """
+    Load test data from response.json file.
+    This function reads the file fresh on each call (no caching) to allow
+    live editing of response.json during development.
+    
+    Returns:
+        dict: Parsed JSON data from response.json
+    
+    Raises:
+        FileNotFoundError: If response.json is not found
+        json.JSONDecodeError: If response.json contains invalid JSON
+    """
+    # Get the directory where main.py is located
+    script_dir = Path(__file__).parent
+    response_file = script_dir / "response.json"
+    
+    if not response_file.exists():
+        raise FileNotFoundError(f"Test data file not found: {response_file}")
+    
+    # Read file fresh on each call (no caching) - file is opened and closed each time
+    logger.info(f"Reading test data from {response_file} (fresh read)")
+    with open(response_file, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    
+    return data
+
+
+def _transform_dates_in_response(data: dict, date_from: str, number_of_days: str) -> dict:
+    """
+    Transform dates in the response data to match the requested date range.
+    
+    Args:
+        data: Response data dictionary from test file
+        date_from: Start date in YYYY-MM-DD format
+        number_of_days: Number of days to fetch (as string)
+    
+    Returns:
+        dict: Response data with dates transformed
+    """
+    # Parse the date_from string
+    base_date = datetime.strptime(date_from, "%Y-%m-%d")
+    num_days = int(number_of_days)
+    
+    # Deep copy the data to avoid modifying the original
+    import copy
+    transformed_data = copy.deepcopy(data)
+    
+    # Get the template day from the test data (first day)
+    if not isinstance(transformed_data, dict) or "days" not in transformed_data:
+        return transformed_data
+    
+    days_list = transformed_data.get("days", [])
+    if not isinstance(days_list, list) or len(days_list) == 0:
+        return transformed_data
+    
+    template_day = days_list[0]
+    
+    # Generate days for the requested date range
+    new_days = []
+    for day_offset in range(num_days):
+        current_date = base_date + timedelta(days=day_offset)
+        current_date_str = current_date.strftime("%Y-%m-%d")
+        
+        # Deep copy the template day
+        new_day = copy.deepcopy(template_day)
+        
+        # Update the day's date
+        new_day["date"] = current_date_str
+        
+        # Update all performance dates
+        if isinstance(new_day, dict) and "performances" in new_day:
+            performances = new_day.get("performances", [])
+            if isinstance(performances, list):
+                for performance in performances:
+                    if isinstance(performance, dict) and "date" in performance:
+                        performance["date"] = current_date_str
+        
+        new_days.append(new_day)
+    
+    # Replace the days array with the transformed days
+    transformed_data["days"] = new_days
+    
+    return transformed_data
+
+
 def _add_side_to_availability(data: dict) -> dict:
     """
     Add 'side' field to availabilityPerProduct objects based on code suffix.
@@ -317,6 +411,29 @@ def calendar_endpoint():
     number_of_days = request.args.get("numberOfDays", "1")
     refresh = request.args.get("refresh", "").lower() in ("true", "1", "yes")
     
+    # Test mode: use dummy data from response.json
+    if TEST_MODE:
+        logger.info(f"Test mode enabled: using dummy data for dateFrom={date_from}, numberOfDays={number_of_days}")
+        try:
+            # Load test data
+            test_data = _load_test_data()
+            # Transform dates to match requested date range
+            response_data = _transform_dates_in_response(test_data, date_from, number_of_days)
+            # Add side field to availabilityPerProduct
+            response_data = _add_side_to_availability(response_data)
+            # Set expiration time (1 hour from now for test mode)
+            expires = time.time() + 3600
+            # Add expires field - handle both dict and list responses
+            if isinstance(response_data, dict):
+                response_with_expires = {**response_data, "expires": int(expires)}
+            else:
+                # For non-dict responses (e.g., arrays), wrap in an object
+                response_with_expires = {"data": response_data, "expires": int(expires)}
+            return jsonify(response_with_expires)
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            logger.error(f"Failed to load test data: {str(e)}")
+            return jsonify({"error": f"Test mode error: {str(e)}"}), 500
+    
     # Generate cache key
     cache_key = _get_cache_key(date_from, number_of_days)
     
@@ -366,21 +483,29 @@ def water_temperature_endpoint():
     Returns:
         JSON response with a single float value
     """
-    # Check cache
+    # Check cache first
     cached_result = _get_water_temp_from_cache()
     if cached_result is not None:
         temperature, expires = cached_result
         return jsonify(temperature)
     
-    # Fetch from upstream
-    try:
-        temperature = get_water_temperature()
-        # Store in cache
-        _store_water_temp_in_cache(temperature)
-        return jsonify(temperature)
-    except (requests.exceptions.RequestException, ValueError) as e:
-        logger.error(f"Water temperature scrape failed: {str(e)}")
-        return jsonify({"error": f"Failed to fetch water temperature: {str(e)}"}), 500
+    # Use lock to prevent concurrent scraping (race condition fix)
+    with _water_temp_lock:
+        # Double-check cache after acquiring lock (another request may have populated it)
+        cached_result = _get_water_temp_from_cache()
+        if cached_result is not None:
+            temperature, expires = cached_result
+            return jsonify(temperature)
+        
+        # Fetch from upstream
+        try:
+            temperature = get_water_temperature()
+            # Store in cache
+            _store_water_temp_in_cache(temperature)
+            return jsonify(temperature)
+        except (requests.exceptions.RequestException, ValueError) as e:
+            logger.error(f"Water temperature scrape failed: {str(e)}")
+            return jsonify({"error": f"Failed to fetch water temperature: {str(e)}"}), 500
 
 
 if __name__ == "__main__":
