@@ -4,6 +4,7 @@ import logging
 import re
 import json
 import threading
+import sys
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -19,6 +20,7 @@ from wave_calendar import (
 )
 
 from history import build_multi_day_response, normalize_calendar_response
+from auth import load_api_keys, require_api_key
 # Don't import scheduler at module level to avoid circular imports
 
 # Set up logging
@@ -43,6 +45,21 @@ CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "600"))
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes and origins
+
+# Load API keys at startup
+try:
+    load_api_keys()
+except ValueError as e:
+    logger.error(f"Failed to start: {str(e)}")
+    print(f"\nERROR: {str(e)}\n", file=sys.stderr)
+    sys.exit(1)
+
+# Register authentication check for all requests
+@app.before_request
+def check_authentication():
+    """Check x-api-key header on all requests."""
+    return require_api_key()
+
 
 
 def get_water_temperature() -> float:

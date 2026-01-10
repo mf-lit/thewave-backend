@@ -8,3 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Configuration files with sensitive data
+config.yaml
+config.json
