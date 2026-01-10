@@ -4,12 +4,22 @@ import logging
 import re
 import json
 import threading
-from pathlib import Path
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import requests
 import bs4 as bs
+
+# Import our modules
+from wave_calendar import (
+    get_calendar,
+    load_test_data,
+    transform_dates_in_response,
+    add_side_to_availability
+)
+
+from history import build_multi_day_response, normalize_calendar_response
+# Don't import scheduler at module level to avoid circular imports
 
 # Set up logging
 logging.basicConfig(
@@ -33,63 +43,6 @@ CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "600"))
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes and origins
-
-
-def get_calendar(date_from: str, number_of_days: str) -> dict:
-    """
-    Fetch calendar events from the upstream API.
-    
-    Args:
-        date_from: Start date in YYYY-MM-DD format
-        number_of_days: Number of days to fetch (as string)
-    
-    Returns:
-        dict: JSON response from the API as a dictionary
-    """
-    url = "https://ticketing-api.thewave.com/api/twb-prod/b2c/v1/events/calendar"
-    
-    # Query parameters - handle array parameters as list of tuples
-    # For array parameters like eventCategoryCode[], pass multiple tuples with same key
-    params = [
-        ("locale", "en-GB"),
-        ("eventCategoryCode[]", "TWBB2C"),
-        ("eventCategoryCode[]", "ALL2"),
-        ("dateFrom", date_from),
-        ("numberOfDays", number_of_days)
-    ]
-    
-    # Headers
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:142.0) Gecko/20100101 Firefox/142.0",
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "en-US,en;q=0.5",
-        "Accept-Encoding": "gzip, deflate, br, zstd",
-        "X-API-KEY": "42",
-        "Origin": "https://ticketing.thewave.com",
-        "Connection": "keep-alive",
-        "Referer": "https://ticketing.thewave.com/",
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "same-site",
-        "DNT": "1",
-        "Sec-GPC": "1"
-    }
-    
-    # Log upstream API call
-    logger.info(f"Calling upstream API: dateFrom={date_from}, numberOfDays={number_of_days}")
-    
-    # Make the request
-    # Note: requests automatically handles compression (equivalent to --compressed)
-    response = requests.get(url, params=params, headers=headers)
-    
-    # Log response status
-    logger.info(f"Upstream API response: status_code={response.status_code}, dateFrom={date_from}, numberOfDays={number_of_days}")
-    
-    # Raise an error for bad status codes
-    response.raise_for_status()
-    
-    # Return JSON response (API always returns JSON)
-    return response.json()
 
 
 def get_water_temperature() -> float:
@@ -233,149 +186,10 @@ def _get_from_cache(key: str) -> tuple[dict, float] | None:
     return None
 
 
-def _load_test_data() -> dict:
-    """
-    Load test data from response.json file.
-    This function reads the file fresh on each call (no caching) to allow
-    live editing of response.json during development.
-    
-    Returns:
-        dict: Parsed JSON data from response.json
-    
-    Raises:
-        FileNotFoundError: If response.json is not found
-        json.JSONDecodeError: If response.json contains invalid JSON
-    """
-    # Get the directory where main.py is located
-    script_dir = Path(__file__).parent
-    response_file = script_dir / "response.json"
-    
-    if not response_file.exists():
-        raise FileNotFoundError(f"Test data file not found: {response_file}")
-    
-    # Read file fresh on each call (no caching) - file is opened and closed each time
-    logger.info(f"Reading test data from {response_file} (fresh read)")
-    with open(response_file, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    
-    return data
-
-
-def _transform_dates_in_response(data: dict, date_from: str, number_of_days: str) -> dict:
-    """
-    Transform dates in the response data to match the requested date range.
-    
-    Args:
-        data: Response data dictionary from test file
-        date_from: Start date in YYYY-MM-DD format
-        number_of_days: Number of days to fetch (as string)
-    
-    Returns:
-        dict: Response data with dates transformed
-    """
-    # Parse the date_from string
-    base_date = datetime.strptime(date_from, "%Y-%m-%d")
-    num_days = int(number_of_days)
-    
-    # Deep copy the data to avoid modifying the original
-    import copy
-    transformed_data = copy.deepcopy(data)
-    
-    # Get the template day from the test data (first day)
-    if not isinstance(transformed_data, dict) or "days" not in transformed_data:
-        return transformed_data
-    
-    days_list = transformed_data.get("days", [])
-    if not isinstance(days_list, list) or len(days_list) == 0:
-        return transformed_data
-    
-    template_day = days_list[0]
-    
-    # Generate days for the requested date range
-    new_days = []
-    for day_offset in range(num_days):
-        current_date = base_date + timedelta(days=day_offset)
-        current_date_str = current_date.strftime("%Y-%m-%d")
-        
-        # Deep copy the template day
-        new_day = copy.deepcopy(template_day)
-        
-        # Update the day's date
-        new_day["date"] = current_date_str
-        
-        # Update all performance dates
-        if isinstance(new_day, dict) and "performances" in new_day:
-            performances = new_day.get("performances", [])
-            if isinstance(performances, list):
-                for performance in performances:
-                    if isinstance(performance, dict) and "date" in performance:
-                        performance["date"] = current_date_str
-        
-        new_days.append(new_day)
-    
-    # Replace the days array with the transformed days
-    transformed_data["days"] = new_days
-    
-    return transformed_data
-
-
-def _add_side_to_availability(data: dict) -> dict:
-    """
-    Add 'side' field to availabilityPerProduct objects based on code suffix.
-    
-    Args:
-        data: Response data dictionary
-    
-    Returns:
-        dict: Response data with side fields added
-    """
-    if not isinstance(data, dict) or "days" not in data:
-        return data
-    
-    days = data.get("days", [])
-    if not isinstance(days, list):
-        return data
-    
-    for day in days:
-        if not isinstance(day, dict) or "performances" not in day:
-            continue
-        
-        performances = day.get("performances", [])
-        if not isinstance(performances, list):
-            continue
-        
-        for performance in performances:
-            if not isinstance(performance, dict) or "availabilityPerProduct" not in performance:
-                continue
-            
-            availability_per_product = performance.get("availabilityPerProduct")
-            # Handle both single object and array cases
-            if isinstance(availability_per_product, list):
-                for item in availability_per_product:
-                    if isinstance(item, dict) and "code" in item:
-                        code = item.get("code", "")
-                        if code.endswith("-L"):
-                            item["side"] = "left"
-                        elif code.endswith("-R"):
-                            item["side"] = "right"
-                        else:
-                            item["side"] = "none"
-            elif isinstance(availability_per_product, dict) and "code" in availability_per_product:
-                code = availability_per_product.get("code", "")
-                if code.endswith("-L"):
-                    availability_per_product["side"] = "left"
-                elif code.endswith("-R"):
-                    availability_per_product["side"] = "right"
-                else:
-                    availability_per_product["side"] = "none"
-    
-    return data
-
-
 def _store_in_cache(key: str, data: dict) -> None:
     """
     Store data in cache with current timestamp and expiration time.
-    
+
     Args:
         key: Cache key
         data: Data to store
@@ -389,10 +203,27 @@ def _store_in_cache(key: str, data: dict) -> None:
     }
 
 
+def _format_response_with_expires(data: dict, expires: float) -> dict:
+    """
+    Format response data with expires field.
+
+    Args:
+        data: Response data (dict or other)
+        expires: Expiration timestamp
+
+    Returns:
+        dict: Response with expires field added
+    """
+    if isinstance(data, dict):
+        return {**data, "expires": int(expires)}
+    return {"data": data, "expires": int(expires)}
+
+
 @app.route("/calendar", methods=["GET"])
 def calendar_endpoint():
     """
     GET /calendar endpoint that caches upstream API responses.
+    For past dates, serves historical data from saved files.
     
     Query Parameters:
         dateFrom (required): Start date in YYYY-MM-DD format
@@ -408,68 +239,59 @@ def calendar_endpoint():
         return jsonify({"error": "Missing required parameter: dateFrom"}), 400
     
     # Get optional parameters
-    number_of_days = request.args.get("numberOfDays", "1")
+    number_of_days_str = request.args.get("numberOfDays", "1")
+    number_of_days = int(number_of_days_str)
     refresh = request.args.get("refresh", "").lower() in ("true", "1", "yes")
     
-    # Test mode: use dummy data from response.json
+    # Test mode: use dummy data from response.json for all dates (past, present, future)
     if TEST_MODE:
         logger.info(f"Test mode enabled: using dummy data for dateFrom={date_from}, numberOfDays={number_of_days}")
         try:
-            # Load test data
-            test_data = _load_test_data()
-            # Transform dates to match requested date range
-            response_data = _transform_dates_in_response(test_data, date_from, number_of_days)
-            # Add side field to availabilityPerProduct
-            response_data = _add_side_to_availability(response_data)
-            # Set expiration time (1 hour from now for test mode)
+            test_data = load_test_data()
+            response_data = transform_dates_in_response(test_data, date_from, number_of_days_str)
+            response_data = add_side_to_availability(response_data)
             expires = time.time() + 3600
-            # Add expires field - handle both dict and list responses
-            if isinstance(response_data, dict):
-                response_with_expires = {**response_data, "expires": int(expires)}
-            else:
-                # For non-dict responses (e.g., arrays), wrap in an object
-                response_with_expires = {"data": response_data, "expires": int(expires)}
-            return jsonify(response_with_expires)
+            return jsonify(_format_response_with_expires(response_data, expires))
         except (FileNotFoundError, json.JSONDecodeError) as e:
             logger.error(f"Failed to load test data: {str(e)}")
             return jsonify({"error": f"Test mode error: {str(e)}"}), 500
     
-    # Generate cache key
-    cache_key = _get_cache_key(date_from, number_of_days)
+    # Check if requesting past dates (history feature - only in production mode)
+    try:
+        requested_date = datetime.strptime(date_from, "%Y-%m-%d").date()
+        today = datetime.now().date()
+
+        if requested_date < today:
+            logger.info(f"Requesting historical data for dateFrom={date_from}, numberOfDays={number_of_days}")
+            response_data = build_multi_day_response(date_from, number_of_days)
+            response_data = add_side_to_availability(response_data)
+            expires = time.time() + 3600
+            return jsonify(_format_response_with_expires(response_data, expires))
+    except ValueError as e:
+        logger.error(f"Invalid date format: {date_from}, error: {str(e)}")
+        return jsonify({"error": f"Invalid date format: {date_from}"}), 400
     
+    # For current/future dates: use upstream API with caching
+    cache_key = _get_cache_key(date_from, number_of_days_str)
+
     # Check cache unless refresh is requested
     if not refresh:
         cached_result = _get_from_cache(cache_key)
         if cached_result is not None:
             cached_data, expires = cached_result
-            # Add side field to availabilityPerProduct
-            cached_data = _add_side_to_availability(cached_data)
-            # Add expires field - handle both dict and list responses
-            if isinstance(cached_data, dict):
-                response_with_expires = {**cached_data, "expires": int(expires)}
-            else:
-                # For non-dict responses (e.g., arrays), wrap in an object
-                response_with_expires = {"data": cached_data, "expires": int(expires)}
-            return jsonify(response_with_expires)
+            cached_data = add_side_to_availability(cached_data)
+            return jsonify(_format_response_with_expires(cached_data, expires))
     
     # Fetch from upstream API
     try:
-        response_data = get_calendar(date_from, number_of_days)
-        # Store original data in cache (without side field)
+        response_data = get_calendar(date_from, number_of_days_str)
+        # Normalize response to ensure proper structure (handles "No schedule data available" cases)
+        response_data = normalize_calendar_response(response_data, date_from, number_of_days)
         _store_in_cache(cache_key, response_data)
-        # Add side field to availabilityPerProduct
-        response_data = _add_side_to_availability(response_data)
-        # Calculate expiration time for this response
+        response_data = add_side_to_availability(response_data)
         expires = time.time() + CACHE_TTL_SECONDS
-        # Add expires field - handle both dict and list responses
-        if isinstance(response_data, dict):
-            response_with_expires = {**response_data, "expires": int(expires)}
-        else:
-            # For non-dict responses (e.g., arrays), wrap in an object
-            response_with_expires = {"data": response_data, "expires": int(expires)}
-        return jsonify(response_with_expires)
+        return jsonify(_format_response_with_expires(response_data, expires))
     except requests.exceptions.RequestException as e:
-        # Log error and return 500 error if upstream API call fails
         logger.error(f"Upstream API call failed: dateFrom={date_from}, numberOfDays={number_of_days}, error={str(e)}")
         return jsonify({"error": f"Upstream API error: {str(e)}"}), 500
 
@@ -483,18 +305,16 @@ def water_temperature_endpoint():
     Returns:
         JSON response with a single float value
     """
-    # Check cache first
     cached_result = _get_water_temp_from_cache()
     if cached_result is not None:
-        temperature, expires = cached_result
+        temperature, _expires = cached_result
         return jsonify(temperature)
-    
-    # Use lock to prevent concurrent scraping (race condition fix)
+
+    # Use lock to prevent concurrent scraping (double-check pattern)
     with _water_temp_lock:
-        # Double-check cache after acquiring lock (another request may have populated it)
         cached_result = _get_water_temp_from_cache()
         if cached_result is not None:
-            temperature, expires = cached_result
+            temperature, _expires = cached_result
             return jsonify(temperature)
         
         # Fetch from upstream
@@ -508,5 +328,21 @@ def water_temperature_endpoint():
             return jsonify({"error": f"Failed to fetch water temperature: {str(e)}"}), 500
 
 
+# Initialize scheduler for daily archive task (only when app runs, not at import time)
+def _init_scheduler():
+    try:
+        from scheduler import setup_daily_archive_task
+        setup_daily_archive_task(app)
+    except ImportError as e:
+        logger.warning(f"Failed to initialize scheduler: {e}")
+
 if __name__ == "__main__":
+    # Initialize scheduler before starting the app
+    _init_scheduler()
     app.run(debug=True, host="0.0.0.0", port=int(os.getenv("PORT", "5000")))
+else:
+    # For production (gunicorn, etc.), initialize scheduler after app creation
+    # Use Flask's before_first_request or app context
+    @app.before_first_request
+    def init_scheduler_on_first_request():
+        _init_scheduler()

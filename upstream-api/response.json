@@ -15,7 +15,7 @@
           "availabilityPerProduct": [
             {
               "availability": {
-                "available": 1,
+                "available": 0,
                 "generalAdmission": false,
                 "level": null,
                 "total": 17
@@ -25,7 +25,7 @@
             },
             {
               "availability": {
-                "available": 1,
+                "available": 4,
                 "generalAdmission": false,
                 "level": null,
                 "total": 17
@@ -69,7 +69,7 @@
           "availabilityPerProduct": [
             {
               "availability": {
-                "available": 1,
+                "available": 0,
                 "generalAdmission": false,
                 "level": null,
                 "total": 0
@@ -79,7 +79,7 @@
             },
             {
               "availability": {
-                "available": 0,
+                "available": 5,
                 "generalAdmission": false,
                 "level": null,
                 "total": 5
@@ -123,7 +123,7 @@
           "availabilityPerProduct": [
             {
               "availability": {
-                "available": 5,
+                "available": 14,
                 "generalAdmission": false,
                 "level": null,
                 "total": 17
@@ -133,7 +133,7 @@
             },
             {
               "availability": {
-                "available": 3,
+                "available": 4,
                 "generalAdmission": false,
                 "level": null,
                 "total": 12
@@ -177,7 +177,7 @@
           "availabilityPerProduct": [
             {
               "availability": {
-                "available": 10,
+                "available": 12,
                 "generalAdmission": false,
                 "level": null,
                 "total": 40
@@ -221,7 +221,7 @@
           "availabilityPerProduct": [
             {
               "availability": {
-                "available": 0,
+                "available": 4,
                 "generalAdmission": false,
                 "level": null,
                 "total": 5
@@ -231,7 +231,7 @@
             },
             {
               "availability": {
-                "available": 1,
+                "available": 0,
                 "generalAdmission": false,
                 "level": null,
                 "total": 0
@@ -275,7 +275,7 @@
           "availabilityPerProduct": [
             {
               "availability": {
-                "available": 6,
+                "available": 11,
                 "generalAdmission": false,
                 "level": null,
                 "total": 13
@@ -285,7 +285,7 @@
             },
             {
               "availability": {
-                "available": 13,
+                "available": 17,
                 "generalAdmission": false,
                 "level": null,
                 "total": 18
@@ -329,7 +329,7 @@
           "availabilityPerProduct": [
             {
               "availability": {
-                "available": 1,
+                "available": 2,
                 "generalAdmission": false,
                 "level": null,
                 "total": 5
@@ -339,7 +339,7 @@
             },
             {
               "availability": {
-                "available": 0,
+                "available": 3,
                 "generalAdmission": false,
                 "level": null,
                 "total": 5
@@ -383,7 +383,7 @@
           "availabilityPerProduct": [
             {
               "availability": {
-                "available": 4,
+                "available": 8,
                 "generalAdmission": false,
                 "level": null,
                 "total": 16
@@ -427,7 +427,7 @@
           "availabilityPerProduct": [
             {
               "availability": {
-                "available": 9,
+                "available": 14,
                 "generalAdmission": false,
                 "level": null,
                 "total": 15
@@ -437,7 +437,7 @@
             },
             {
               "availability": {
-                "available": 1,
+                "available": 5,
                 "generalAdmission": false,
                 "level": null,
                 "total": 15
@@ -481,7 +481,7 @@
           "availabilityPerProduct": [
             {
               "availability": {
-                "available": 1,
+                "available": 7,
                 "generalAdmission": false,
                 "level": null,
                 "total": 16
@@ -525,7 +525,7 @@
           "availabilityPerProduct": [
             {
               "availability": {
-                "available": 1,
+                "available": 4,
                 "generalAdmission": false,
                 "level": null,
                 "total": 5
@@ -535,7 +535,7 @@
             },
             {
               "availability": {
-                "available": 0,
+                "available": 1,
                 "generalAdmission": false,
                 "level": null,
                 "total": 0
@@ -579,7 +579,7 @@
           "availabilityPerProduct": [
             {
               "availability": {
-                "available": 10,
+                "available": 14,
                 "generalAdmission": false,
                 "level": null,
                 "total": 18
@@ -589,7 +589,7 @@
             },
             {
               "availability": {
-                "available": 7,
+                "available": 9,
                 "generalAdmission": false,
                 "level": null,
                 "total": 13
@@ -643,7 +643,7 @@
             },
             {
               "availability": {
-                "available": 4,
+                "available": 9,
                 "generalAdmission": false,
                 "level": null,
                 "total": 20
@@ -687,7 +687,7 @@
           "availabilityPerProduct": [
             {
               "availability": {
-                "available": 10,
+                "available": 12,
                 "generalAdmission": false,
                 "level": null,
                 "total": 20
@@ -697,7 +697,7 @@
             },
             {
               "availability": {
-                "available": 0,
+                "available": 1,
                 "generalAdmission": false,
                 "level": null,
                 "total": 0
@@ -741,7 +741,7 @@
           "availabilityPerProduct": [
             {
               "availability": {
-                "available": 9,
+                "available": 6,
                 "generalAdmission": false,
                 "level": null,
                 "total": 12
@@ -751,7 +751,7 @@
             },
             {
               "availability": {
-                "available": 9,
+                "available": 10,
                 "generalAdmission": false,
                 "level": null,
                 "total": 12
@@ -795,7 +795,7 @@
           "availabilityPerProduct": [
             {
               "availability": {
-                "available": 8,
+                "available": 13,
                 "generalAdmission": false,
                 "level": null,
                 "total": 17
@@ -805,7 +805,7 @@
             },
             {
               "availability": {
-                "available": 4,
+                "available": 7,
                 "generalAdmission": false,
                 "level": null,
                 "total": 17
