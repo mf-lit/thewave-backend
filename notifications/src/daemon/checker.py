@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Dict, List
 
-from src.storage.dynamodb import DynamoDBStorage
+from src.storage.sqlite import SQLiteStorage
 from src.utils.calendar import (
     extract_availability_by_side,
     fetch_calendar_data_for_dates,
@@ -80,11 +80,11 @@ def check_notification_conditions(
     return False, ""
 
 
-def check_availability(storage: DynamoDBStorage) -> None:
+def check_availability(storage: SQLiteStorage) -> None:
     """Check availability for all notifications and trigger notifications as needed.
 
     Args:
-        storage: DynamoDB storage instance
+        storage: SQLite storage instance
     """
     logger.info("Starting availability check")
 

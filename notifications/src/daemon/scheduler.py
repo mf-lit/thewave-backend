@@ -7,7 +7,7 @@ import time
 import schedule
 
 from src.daemon.checker import check_availability
-from src.storage.dynamodb import DynamoDBStorage
+from src.storage.sqlite import SQLiteStorage
 
 logging.basicConfig(
     level=logging.INFO,
@@ -15,7 +15,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-storage = DynamoDBStorage()
+storage = SQLiteStorage()
 
 
 def run_check():
@@ -37,9 +37,9 @@ def main():
     # Ensure table exists
     try:
         storage.ensure_table_exists()
-        logger.info("DynamoDB table ready")
+        logger.info("SQLite database ready")
     except Exception as e:
-        logger.error(f"Failed to initialize DynamoDB table: {e}")
+        logger.error(f"Failed to initialize SQLite database: {e}")
         sys.exit(1)
 
     # Schedule the check to run every 3 minutes

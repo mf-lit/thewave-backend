@@ -7,11 +7,11 @@ from typing import Dict, Optional
 import firebase_admin
 from firebase_admin import credentials, messaging
 
-from src.storage.dynamodb import DynamoDBStorage
+from src.storage.sqlite import SQLiteStorage
 
 logger = logging.getLogger(__name__)
 
-storage = DynamoDBStorage()
+storage = SQLiteStorage()
 
 # Firebase app instance (singleton)
 _firebase_app: Optional[firebase_admin.App] = None

@@ -9,7 +9,7 @@ from flask import Blueprint, jsonify, request
 logger = logging.getLogger(__name__)
 
 from src.api.models import CreateNotificationRequest, NotificationResponse
-from src.storage.dynamodb import DynamoDBStorage
+from src.storage.sqlite import SQLiteStorage
 from src.utils.calendar import (
     extract_availability_by_side,
     fetch_calendar_data,
@@ -19,7 +19,7 @@ from src.utils.calendar import (
 from src.utils.fcm import validate_fcm_token
 
 bp = Blueprint("notifications", __name__)
-storage = DynamoDBStorage()
+storage = SQLiteStorage()
 
 
 def log_response(endpoint: str, response_data: dict, status_code: int):

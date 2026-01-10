@@ -11,7 +11,7 @@ This system consists of two main components:
 
 ## Architecture
 
-- **Storage**: DynamoDB (via LocalStack for local development)
+- **Storage**: SQLite (lightweight, embedded database)
 - **API Framework**: Flask
 - **Language**: Python 3.11+
 
@@ -21,7 +21,6 @@ This system consists of two main components:
 
 - Python 3.11 or higher
 - UV package manager
-- LocalStack running on `http://192.168.1.1:8001` (or configure via `AWS_ENDPOINT_URL`)
 
 ### Installation
 
@@ -32,8 +31,8 @@ uv sync
 
 ### Environment Variables
 
-- `AWS_ENDPOINT_URL` - DynamoDB endpoint (default: `http://192.168.1.1:8001`)
 - `CALENDAR_API_URL` - Upstream calendar API URL (default: `http://localhost:5000/calendar`)
+- `SQLITE_DB_PATH` - Path to SQLite database file (default: `notifications.db`)
 
 ## Usage
 
@@ -91,13 +90,58 @@ GET /clients/{client_id}/notifications
 DELETE /clients/{client_id}/notifications/{notification_id}
 ```
 
-## DynamoDB Schema
+## Database Schema
 
-**Table**: `waveform-notifications`
+### Notifications Table
 
-- **Partition Key**: `client_id` (String, UUID)
-- **Sort Key**: `notification_id` (String, UUID)
-- **GSI**: `performance_ak-index` on `performance_ak`
+```sql
+CREATE TABLE notifications (
+    client_id TEXT NOT NULL,
+    notification_id TEXT NOT NULL,
+    performance_ak TEXT NOT NULL,
+    date TEXT NOT NULL,
+    time TEXT NOT NULL,
+    side TEXT NOT NULL,
+    title TEXT NOT NULL,
+    notification_type TEXT NOT NULL,
+    thresholds TEXT,  -- JSON array for below_threshold type
+    notified_thresholds TEXT,  -- JSON array of triggered thresholds
+    last_checked_availability INTEGER,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (client_id, notification_id)
+);
+```
+
+**Indexes:**
+- `idx_performance_ak` on `performance_ak` for efficient queries by performance
+- `idx_date` on `date` for date-based queries
+
+### Clients Table
+
+```sql
+CREATE TABLE clients (
+    client_id TEXT PRIMARY KEY,
+    fcm_token TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+```
+
+## Migrating from DynamoDB
+
+If you have existing data in DynamoDB and want to migrate to SQLite, run the migration script:
+
+```bash
+python migrate_to_sqlite.py
+```
+
+This will:
+1. Connect to your existing DynamoDB instance (LocalStack)
+2. Fetch all notifications and client tokens
+3. Create SQLite database tables
+4. Migrate all data to SQLite
+5. Save the database to `notifications.db`
+
+**Note**: The migration script does not delete data from DynamoDB. You can safely run it multiple times.
 
 ## Development
 
