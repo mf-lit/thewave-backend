@@ -168,7 +168,8 @@ def check_availability(storage: DynamoDBStorage) -> None:
                 )
 
                 if should_notify:
-                    # Update notified thresholds if applicable
+                    # Determine the threshold that was crossed
+                    threshold_value = None
                     if notification.get("notification_type") == "below_threshold":
                         thresholds = notification.get("thresholds", [])
                         notified_thresholds = notification.get(
@@ -191,6 +192,8 @@ def check_availability(storage: DynamoDBStorage) -> None:
                                 notification.get("notification_id"),
                                 {"notified_thresholds": notified_thresholds},
                             )
+                            # Use the first threshold that was crossed (matches the message)
+                            threshold_value = newly_crossed[0] if newly_crossed else None
 
                     # Send notification
                     send_notification(
@@ -198,6 +201,7 @@ def check_availability(storage: DynamoDBStorage) -> None:
                         notification.get("client_id"),
                         message,
                         current_availability,
+                        threshold_value,
                     )
                     logger.info(
                         f"Sent notification for {notification.get('notification_id')}: {message}"

@@ -66,7 +66,7 @@ def _initialize_firebase():
         return None
 
 
-def send_notification(notification: Dict, client_id: str, message: str, availability: int):
+def send_notification(notification: Dict, client_id: str, message: str, availability: int, threshold: Optional[int] = None):
     """Send a notification to a client via FCM.
 
     Retrieves the client's FCM token and sends a push notification via Firebase.
@@ -76,6 +76,7 @@ def send_notification(notification: Dict, client_id: str, message: str, availabi
         client_id: UUID of the client to notify
         message: Notification message
         availability: Current availability count for the session
+        threshold: The threshold that was crossed (for below_threshold type), None for above_zero
     """
     # Initialize Firebase if not already done
     firebase_app = _initialize_firebase()
@@ -95,12 +96,12 @@ def send_notification(notification: Dict, client_id: str, message: str, availabi
         )
         return
 
-    # Build notification title
+    # Get session title
     session_title = notification.get("title", "Session")
-    notification_title = f"Session Alert: {session_title}"
 
     # Prepare data payload for app processing
     # FCM data payload values must be strings
+    # Data-only messages ensure consistent delivery to onMessageReceived() regardless of app state
     data_payload = {
         "performance_ak": str(notification.get("performance_ak", "")),
         "date": str(notification.get("date", "")),
@@ -109,19 +110,18 @@ def send_notification(notification: Dict, client_id: str, message: str, availabi
         "session_title": str(session_title),
         "availability": str(availability),
         "notification_type": str(notification.get("notification_type", "")),
+        "notification_id": str(notification.get("notification_id", "")),
+        "threshold": str(threshold) if threshold is not None else "",
     }
 
     # Log the payload being sent
     logger.info(
-        f"Sending FCM notification to client {client_id} with payload: {json.dumps(data_payload, indent=2)}"
+        f"Sending FCM data-only message to client {client_id} with payload: {json.dumps(data_payload, indent=2)}"
     )
 
-    # Create FCM message with both notification and data payloads
+    # Create FCM message with data payload only (no notification payload)
+    # This ensures all messages are delivered to onMessageReceived() for consistent handling
     fcm_message = messaging.Message(
-        notification=messaging.Notification(
-            title=notification_title,
-            body=message,
-        ),
         data=data_payload,
         token=fcm_token,
     )
@@ -130,7 +130,7 @@ def send_notification(notification: Dict, client_id: str, message: str, availabi
         # Send the message
         response = messaging.send(fcm_message)
         logger.info(
-            f"Successfully sent FCM notification to client {client_id}. "
+            f"Successfully sent FCM data-only message to client {client_id}. "
             f"Message ID: {response}. Session: {session_title} ({notification.get('date')} {notification.get('time')})"
         )
     except messaging.UnregisteredError:
