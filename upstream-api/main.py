@@ -12,15 +12,15 @@ import requests
 import bs4 as bs
 
 # Import our modules
-from wave_calendar import (
+from src.core.wave_calendar import (
     get_calendar,
     load_test_data,
     transform_dates_in_response,
     add_side_to_availability
 )
 
-from history import build_multi_day_response, normalize_calendar_response
-from auth import load_api_keys, require_api_key
+from src.core.history import build_multi_day_response, normalize_calendar_response
+from src.core.auth import load_api_keys, require_api_key
 # Don't import scheduler at module level to avoid circular imports
 
 # Set up logging
@@ -348,7 +348,7 @@ def water_temperature_endpoint():
 # Initialize scheduler for daily archive task (only when app runs, not at import time)
 def _init_scheduler():
     try:
-        from scheduler import setup_daily_archive_task
+        from src.core.scheduler import setup_daily_archive_task
         setup_daily_archive_task(app)
     except ImportError as e:
         logger.warning(f"Failed to initialize scheduler: {e}")

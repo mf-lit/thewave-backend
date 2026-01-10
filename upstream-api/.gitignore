@@ -10,5 +10,9 @@ wheels/
 .venv
 
 # Configuration files with sensitive data
+config/config.yaml
 config.yaml
 config.json
+
+# Data files (history is generated, test data may be sensitive)
+data/history/

@@ -22,7 +22,10 @@ COPY pyproject.toml uv.lock ./
 RUN uv pip install --system --no-cache .
 
 # Copy application code
-COPY main.py temperature.py ./
+COPY main.py ./
+COPY src/ ./src/
+COPY config/ ./config/
+COPY data/ ./data/
 
 # Change ownership to non-root user
 RUN chown -R appuser:appuser /app
