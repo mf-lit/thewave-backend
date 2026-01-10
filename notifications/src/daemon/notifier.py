@@ -1,7 +1,7 @@
 """Notification sender via Firebase Cloud Messaging."""
 import json
-import os
 import logging
+import os
 from typing import Dict, Optional
 
 import firebase_admin
@@ -12,41 +12,35 @@ from src.storage.sqlite import SQLiteStorage
 logger = logging.getLogger(__name__)
 
 storage = SQLiteStorage()
-
-# Firebase app instance (singleton)
 _firebase_app: Optional[firebase_admin.App] = None
 
 
-def _initialize_firebase():
-    """Initialize Firebase Admin SDK if not already initialized.
+def _get_credentials_path() -> str:
+    """Get the Firebase credentials file path."""
+    creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "google_application_credentials.json")
 
-    Uses GOOGLE_APPLICATION_CREDENTIALS environment variable or defaults to
-    google_application_credentials.json in the project root.
-    """
+    if os.path.isabs(creds_path):
+        return creds_path
+
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    return os.path.join(project_root, creds_path)
+
+
+def _initialize_firebase() -> Optional[firebase_admin.App]:
+    """Initialize Firebase Admin SDK if not already initialized."""
     global _firebase_app
 
     if _firebase_app is not None:
         return _firebase_app
 
     try:
-        # Check if Firebase is already initialized
         _firebase_app = firebase_admin.get_app()
         logger.info("Firebase Admin SDK already initialized")
         return _firebase_app
     except ValueError:
-        # Not initialized yet, proceed to initialize
         pass
 
-    # Get credentials file path
-    creds_path = os.getenv(
-        "GOOGLE_APPLICATION_CREDENTIALS", "google_application_credentials.json"
-    )
-
-    # Resolve to absolute path if relative
-    if not os.path.isabs(creds_path):
-        # Get project root (parent of src directory)
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        creds_path = os.path.join(project_root, creds_path)
+    creds_path = _get_credentials_path()
 
     if not os.path.exists(creds_path):
         logger.error(
@@ -66,86 +60,56 @@ def _initialize_firebase():
         return None
 
 
-def send_notification(notification: Dict, client_id: str, message: str, availability: int, threshold: Optional[int] = None):
-    """Send a notification to a client via FCM.
-
-    Retrieves the client's FCM token and sends a push notification via Firebase.
-
-    Args:
-        notification: Notification dictionary
-        client_id: UUID of the client to notify
-        message: Notification message
-        availability: Current availability count for the session
-        threshold: The threshold that was crossed (for below_threshold type), None for above_zero
-    """
-    # Initialize Firebase if not already done
-    firebase_app = _initialize_firebase()
-    if firebase_app is None:
-        logger.error(
-            "Firebase not initialized. Cannot send notification. "
-            "Check Firebase credentials configuration."
-        )
-        return
-
-    # Retrieve FCM token for the client
-    fcm_token = storage.get_client_token(client_id)
-
-    if not fcm_token:
-        logger.warning(
-            f"No FCM token found for client {client_id}. Skipping notification."
-        )
-        return
-
-    # Get session title
-    session_title = notification.get("title", "Session")
-
-    # Prepare data payload for app processing
-    # FCM data payload values must be strings
-    # Data-only messages ensure consistent delivery to onMessageReceived() regardless of app state
-    data_payload = {
+def _build_data_payload(notification: Dict, availability: int, threshold: Optional[int]) -> Dict[str, str]:
+    """Build the FCM data payload from notification data."""
+    return {
         "performance_ak": str(notification.get("performance_ak", "")),
         "date": str(notification.get("date", "")),
         "time": str(notification.get("time", "")),
         "side": str(notification.get("side", "")),
-        "session_title": str(session_title),
+        "session_title": str(notification.get("title", "Session")),
         "availability": str(availability),
         "notification_type": str(notification.get("notification_type", "")),
         "notification_id": str(notification.get("notification_id", "")),
         "threshold": str(threshold) if threshold is not None else "",
     }
 
-    # Log the payload being sent
-    logger.info(
-        f"Sending FCM data-only message to client {client_id} with payload: {json.dumps(data_payload, indent=2)}"
-    )
 
-    # Create FCM message with data payload only (no notification payload)
-    # This ensures all messages are delivered to onMessageReceived() for consistent handling
-    fcm_message = messaging.Message(
-        data=data_payload,
-        token=fcm_token,
-    )
+def send_notification(
+    notification: Dict,
+    client_id: str,
+    message: str,
+    availability: int,
+    threshold: Optional[int] = None,
+) -> None:
+    """Send a push notification to a client via FCM."""
+    firebase_app = _initialize_firebase()
+    if firebase_app is None:
+        logger.error("Firebase not initialized. Cannot send notification.")
+        return
+
+    fcm_token = storage.get_client_token(client_id)
+    if not fcm_token:
+        logger.warning(f"No FCM token found for client {client_id}. Skipping notification.")
+        return
+
+    data_payload = _build_data_payload(notification, availability, threshold)
+    logger.info(f"Sending FCM data-only message to client {client_id} with payload: {json.dumps(data_payload, indent=2)}")
+
+    fcm_message = messaging.Message(data=data_payload, token=fcm_token)
 
     try:
-        # Send the message
         response = messaging.send(fcm_message)
+        session_title = notification.get("title", "Session")
         logger.info(
-            f"Successfully sent FCM data-only message to client {client_id}. "
+            f"Successfully sent FCM message to client {client_id}. "
             f"Message ID: {response}. Session: {session_title} ({notification.get('date')} {notification.get('time')})"
         )
     except messaging.UnregisteredError:
-        # Token is invalid or unregistered - delete it
-        logger.warning(
-            f"FCM token for client {client_id} is invalid or unregistered. Deleting token."
-        )
+        logger.warning(f"FCM token for client {client_id} is invalid. Deleting token.")
         storage.delete_client_token(client_id)
     except messaging.InvalidArgumentError as e:
-        logger.error(
-            f"Invalid argument when sending FCM notification to client {client_id}: {e}"
-        )
+        logger.error(f"Invalid argument when sending FCM notification to client {client_id}: {e}")
     except Exception as e:
-        logger.error(
-            f"Failed to send FCM notification to client {client_id}: {e}",
-            exc_info=True,
-        )
+        logger.error(f"Failed to send FCM notification to client {client_id}: {e}", exc_info=True)
 

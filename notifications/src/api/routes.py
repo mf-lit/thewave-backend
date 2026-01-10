@@ -2,11 +2,9 @@
 import json
 import logging
 import uuid
-from typing import Dict
+from typing import Tuple
 
 from flask import Blueprint, jsonify, request
-
-logger = logging.getLogger(__name__)
 
 from src.api.models import CreateNotificationRequest, NotificationResponse
 from src.storage.sqlite import SQLiteStorage
@@ -18,46 +16,51 @@ from src.utils.calendar import (
 )
 from src.utils.fcm import validate_fcm_token
 
+logger = logging.getLogger(__name__)
+
 bp = Blueprint("notifications", __name__)
 storage = SQLiteStorage()
 
 
-def log_response(endpoint: str, response_data: dict, status_code: int):
-    """Helper function to log response data."""
-    logger.info(
-        f"{endpoint} - Response ({status_code}): {json.dumps(response_data, indent=2)}"
-    )
+def log_response(endpoint: str, response_data: dict, status_code: int) -> None:
+    """Log response data for debugging."""
+    logger.info(f"{endpoint} - Response ({status_code}): {json.dumps(response_data, indent=2)}")
 
 
-def validate_uuid(uuid_string: str) -> bool:
-    """Validate that a string is a valid UUID."""
+def is_valid_uuid(value: str) -> bool:
+    """Check if a string is a valid UUID."""
     try:
-        uuid.UUID(uuid_string)
+        uuid.UUID(value)
         return True
     except (ValueError, AttributeError):
         return False
 
 
+def error_response(message: str, status_code: int, endpoint: str) -> Tuple:
+    """Create a standardized error response with logging."""
+    response_data = {"error": message}
+    log_response(endpoint, response_data, status_code)
+    return jsonify(response_data), status_code
+
+
+def success_response(data: dict, status_code: int, endpoint: str) -> Tuple:
+    """Create a standardized success response with logging."""
+    log_response(endpoint, data, status_code)
+    return jsonify(data), status_code
+
+
 @bp.route("/clients/<client_id>/notifications", methods=["POST"])
 def create_notification(client_id: str):
     """Create a new notification for a client."""
-    # Log request
+    endpoint = f"POST /clients/{client_id}/notifications"
     data = request.get_json()
-    logger.info(
-        f"POST /clients/{client_id}/notifications - Request body: {json.dumps(data, indent=2)}"
-    )
+    logger.info(f"{endpoint} - Request body: {json.dumps(data, indent=2)}")
 
-    # Validate client_id
-    if not validate_uuid(client_id):
-        response_data = {"error": "Invalid client_id format"}
-        log_response(f"POST /clients/{client_id}/notifications", response_data, 400)
-        return jsonify(response_data), 400
+    if not is_valid_uuid(client_id):
+        return error_response("Invalid client_id format", 400, endpoint)
 
-    # Parse and validate request body
     if not data:
-        response_data = {"error": "Request body is required"}
-        log_response(f"POST /clients/{client_id}/notifications", response_data, 400)
-        return jsonify(response_data), 400
+        return error_response("Request body is required", 400, endpoint)
 
     try:
         req = CreateNotificationRequest(
@@ -69,50 +72,32 @@ def create_notification(client_id: str):
             thresholds=data.get("thresholds"),
         )
     except KeyError as e:
-        response_data = {"error": f"Missing required field: {e.args[0]}"}
-        log_response(f"POST /clients/{client_id}/notifications", response_data, 400)
-        return jsonify(response_data), 400
+        return error_response(f"Missing required field: {e.args[0]}", 400, endpoint)
 
-    # Validate request
-    is_valid, error_msg = req.validate()
+    is_valid, validation_error = req.validate()
     if not is_valid:
-        response_data = {"error": error_msg}
-        log_response(f"POST /clients/{client_id}/notifications", response_data, 400)
-        return jsonify(response_data), 400
+        return error_response(validation_error, 400, endpoint)
 
-    # Fetch calendar data to validate performanceAK exists and get title
+    # Fetch calendar data to validate performance exists
     try:
         calendar_data = fetch_calendar_data(req.date, 1)
         performance = find_performance_by_ak(calendar_data, req.performance_ak)
         if not performance:
-            response_data = {
-                "error": f"Performance not found for performanceAK={req.performance_ak}"
-            }
-            log_response(f"POST /clients/{client_id}/notifications", response_data, 404)
-            return jsonify(response_data), 404
+            return error_response(f"Performance not found for performanceAK={req.performance_ak}", 404, endpoint)
     except Exception as e:
-        response_data = {"error": f"Failed to fetch calendar data: {str(e)}"}
-        log_response(f"POST /clients/{client_id}/notifications", response_data, 500)
-        return jsonify(response_data), 500
+        return error_response(f"Failed to fetch calendar data: {str(e)}", 500, endpoint)
 
     # Verify the side exists for this performance
     availability = extract_availability_by_side(performance, req.side)
     if availability is None:
-        response_data = {
-            "error": f"Side '{req.side}' not found for performance {req.performance_ak}"
-        }
-        log_response(f"POST /clients/{client_id}/notifications", response_data, 400)
-        return jsonify(response_data), 400
+        return error_response(f"Side '{req.side}' not found for performance {req.performance_ak}", 400, endpoint)
 
-    title = get_performance_title(performance)
-
-    # Create notification in DynamoDB
     notification_data = {
         "performance_ak": req.performance_ak,
         "date": req.date,
         "time": req.time,
         "side": req.side,
-        "title": title,
+        "title": get_performance_title(performance),
         "notification_type": req.notification_type,
     }
     if req.thresholds:
@@ -121,118 +106,76 @@ def create_notification(client_id: str):
     try:
         storage.ensure_table_exists()
         notification = storage.create_notification(client_id, notification_data)
-        response = NotificationResponse.from_dict(notification)
-        response_data = response.to_dict()
-        log_response(f"POST /clients/{client_id}/notifications", response_data, 201)
-        return jsonify(response_data), 201
+        response_data = NotificationResponse.from_dict(notification).to_dict()
+        return success_response(response_data, 201, endpoint)
     except Exception as e:
-        response_data = {"error": f"Failed to create notification: {str(e)}"}
-        log_response(f"POST /clients/{client_id}/notifications", response_data, 500)
-        return jsonify(response_data), 500
+        return error_response(f"Failed to create notification: {str(e)}", 500, endpoint)
 
 
 @bp.route("/clients/<client_id>/notifications", methods=["GET"])
 def list_notifications(client_id: str):
     """List all notifications for a client."""
-    logger.info(f"GET /clients/{client_id}/notifications - Request")
-    
-    # Validate client_id
-    if not validate_uuid(client_id):
-        response_data = {"error": "Invalid client_id format"}
-        log_response(f"GET /clients/{client_id}/notifications", response_data, 400)
-        return jsonify(response_data), 400
+    endpoint = f"GET /clients/{client_id}/notifications"
+    logger.info(f"{endpoint} - Request")
+
+    if not is_valid_uuid(client_id):
+        return error_response("Invalid client_id format", 400, endpoint)
 
     try:
         storage.ensure_table_exists()
         notifications = storage.get_notifications_by_client(client_id)
-        response_data = [
-            NotificationResponse.from_dict(n).to_dict() for n in notifications
-        ]
-        log_response(f"GET /clients/{client_id}/notifications", response_data, 200)
-        return jsonify(response_data), 200
+        response_data = [NotificationResponse.from_dict(n).to_dict() for n in notifications]
+        return success_response(response_data, 200, endpoint)
     except Exception as e:
-        response_data = {"error": f"Failed to list notifications: {str(e)}"}
-        log_response(f"GET /clients/{client_id}/notifications", response_data, 500)
-        return jsonify(response_data), 500
+        return error_response(f"Failed to list notifications: {str(e)}", 500, endpoint)
 
 
-@bp.route(
-    "/clients/<client_id>/notifications/<notification_id>", methods=["DELETE"]
-)
+@bp.route("/clients/<client_id>/notifications/<notification_id>", methods=["DELETE"])
 def delete_notification(client_id: str, notification_id: str):
     """Delete a notification."""
-    logger.info(f"DELETE /clients/{client_id}/notifications/{notification_id} - Request")
-    
-    # Validate UUIDs
-    if not validate_uuid(client_id):
-        response_data = {"error": "Invalid client_id format"}
-        log_response(f"DELETE /clients/{client_id}/notifications/{notification_id}", response_data, 400)
-        return jsonify(response_data), 400
-    if not validate_uuid(notification_id):
-        response_data = {"error": "Invalid notification_id format"}
-        log_response(f"DELETE /clients/{client_id}/notifications/{notification_id}", response_data, 400)
-        return jsonify(response_data), 400
+    endpoint = f"DELETE /clients/{client_id}/notifications/{notification_id}"
+    logger.info(f"{endpoint} - Request")
+
+    if not is_valid_uuid(client_id):
+        return error_response("Invalid client_id format", 400, endpoint)
+    if not is_valid_uuid(notification_id):
+        return error_response("Invalid notification_id format", 400, endpoint)
 
     try:
         storage.ensure_table_exists()
-        # Verify the notification belongs to the client
         notification = storage.get_notification_by_id(client_id, notification_id)
         if not notification:
-            response_data = {"error": "Notification not found"}
-            log_response(f"DELETE /clients/{client_id}/notifications/{notification_id}", response_data, 404)
-            return jsonify(response_data), 404
+            return error_response("Notification not found", 404, endpoint)
 
-        # Delete the notification
         deleted = storage.delete_notification(client_id, notification_id)
         if deleted:
-            response_data = {"message": "Notification deleted"}
-            log_response(f"DELETE /clients/{client_id}/notifications/{notification_id}", response_data, 200)
-            return jsonify(response_data), 200
-        else:
-            response_data = {"error": "Failed to delete notification"}
-            log_response(f"DELETE /clients/{client_id}/notifications/{notification_id}", response_data, 500)
-            return jsonify(response_data), 500
+            return success_response({"message": "Notification deleted"}, 200, endpoint)
+        return error_response("Failed to delete notification", 500, endpoint)
     except Exception as e:
-        response_data = {"error": f"Failed to delete notification: {str(e)}"}
-        log_response(f"DELETE /clients/{client_id}/notifications/{notification_id}", response_data, 500)
-        return jsonify(response_data), 500
+        return error_response(f"Failed to delete notification: {str(e)}", 500, endpoint)
 
 
 @bp.route("/clients/<client_id>/fcm-token", methods=["PUT"])
 def create_or_update_fcm_token(client_id: str):
     """Create or update FCM token for a client."""
-    # Log request
+    endpoint = f"PUT /clients/{client_id}/fcm-token"
     data = request.get_json()
-    logger.info(
-        f"PUT /clients/{client_id}/fcm-token - Request body: {json.dumps(data, indent=2) if data else 'None'}"
-    )
+    logger.info(f"{endpoint} - Request body: {json.dumps(data, indent=2) if data else 'None'}")
 
-    # Validate client_id
-    if not validate_uuid(client_id):
-        response_data = {"error": "Invalid client_id format"}
-        log_response(f"PUT /clients/{client_id}/fcm-token", response_data, 400)
-        return jsonify(response_data), 400
+    if not is_valid_uuid(client_id):
+        return error_response("Invalid client_id format", 400, endpoint)
 
-    # Parse and validate request body
     if not data:
-        response_data = {"error": "Request body is required"}
-        log_response(f"PUT /clients/{client_id}/fcm-token", response_data, 400)
-        return jsonify(response_data), 400
+        return error_response("Request body is required", 400, endpoint)
 
     fcm_token = data.get("fcm_token")
     if not fcm_token:
-        response_data = {"error": "fcm_token is required"}
-        log_response(f"PUT /clients/{client_id}/fcm-token", response_data, 400)
-        return jsonify(response_data), 400
+        return error_response("fcm_token is required", 400, endpoint)
 
-    # Validate FCM token format
-    is_valid, error_msg = validate_fcm_token(fcm_token)
+    is_valid, validation_error = validate_fcm_token(fcm_token)
     if not is_valid:
-        response_data = {"error": error_msg}
-        log_response(f"PUT /clients/{client_id}/fcm-token", response_data, 400)
-        return jsonify(response_data), 400
+        return error_response(validation_error, 400, endpoint)
 
-    # Create or update token
     try:
         storage.ensure_clients_table_exists()
         client_record = storage.create_or_update_client_token(client_id, fcm_token)
@@ -240,67 +183,45 @@ def create_or_update_fcm_token(client_id: str):
             "message": "FCM token saved successfully",
             "updated_at": client_record["updated_at"],
         }
-        log_response(f"PUT /clients/{client_id}/fcm-token", response_data, 200)
-        return jsonify(response_data), 200
+        return success_response(response_data, 200, endpoint)
     except Exception as e:
-        response_data = {"error": f"Failed to save FCM token: {str(e)}"}
-        log_response(f"PUT /clients/{client_id}/fcm-token", response_data, 500)
-        return jsonify(response_data), 500
+        return error_response(f"Failed to save FCM token: {str(e)}", 500, endpoint)
 
 
 @bp.route("/clients/<client_id>/fcm-token", methods=["GET"])
 def get_fcm_token(client_id: str):
-    """Get FCM token for a client (existence check only)."""
-    logger.info(f"GET /clients/{client_id}/fcm-token - Request")
+    """Check if FCM token exists for a client (does not return actual token for security)."""
+    endpoint = f"GET /clients/{client_id}/fcm-token"
+    logger.info(f"{endpoint} - Request")
 
-    # Validate client_id
-    if not validate_uuid(client_id):
-        response_data = {"error": "Invalid client_id format"}
-        log_response(f"GET /clients/{client_id}/fcm-token", response_data, 400)
-        return jsonify(response_data), 400
+    if not is_valid_uuid(client_id):
+        return error_response("Invalid client_id format", 400, endpoint)
 
     try:
         storage.ensure_clients_table_exists()
         fcm_token = storage.get_client_token(client_id)
         if fcm_token:
-            # Return confirmation that token exists, but not the actual token for security
-            response_data = {"has_token": True}
-            log_response(f"GET /clients/{client_id}/fcm-token", response_data, 200)
-            return jsonify(response_data), 200
-        else:
-            response_data = {"error": "FCM token not found"}
-            log_response(f"GET /clients/{client_id}/fcm-token", response_data, 404)
-            return jsonify(response_data), 404
+            return success_response({"has_token": True}, 200, endpoint)
+        return error_response("FCM token not found", 404, endpoint)
     except Exception as e:
-        response_data = {"error": f"Failed to get FCM token: {str(e)}"}
-        log_response(f"GET /clients/{client_id}/fcm-token", response_data, 500)
-        return jsonify(response_data), 500
+        return error_response(f"Failed to get FCM token: {str(e)}", 500, endpoint)
 
 
 @bp.route("/clients/<client_id>/fcm-token", methods=["DELETE"])
 def delete_fcm_token(client_id: str):
     """Delete FCM token for a client."""
-    logger.info(f"DELETE /clients/{client_id}/fcm-token - Request")
+    endpoint = f"DELETE /clients/{client_id}/fcm-token"
+    logger.info(f"{endpoint} - Request")
 
-    # Validate client_id
-    if not validate_uuid(client_id):
-        response_data = {"error": "Invalid client_id format"}
-        log_response(f"DELETE /clients/{client_id}/fcm-token", response_data, 400)
-        return jsonify(response_data), 400
+    if not is_valid_uuid(client_id):
+        return error_response("Invalid client_id format", 400, endpoint)
 
     try:
         storage.ensure_clients_table_exists()
         deleted = storage.delete_client_token(client_id)
         if deleted:
-            response_data = {"message": "FCM token deleted successfully"}
-            log_response(f"DELETE /clients/{client_id}/fcm-token", response_data, 200)
-            return jsonify(response_data), 200
-        else:
-            response_data = {"error": "FCM token not found"}
-            log_response(f"DELETE /clients/{client_id}/fcm-token", response_data, 404)
-            return jsonify(response_data), 404
+            return success_response({"message": "FCM token deleted successfully"}, 200, endpoint)
+        return error_response("FCM token not found", 404, endpoint)
     except Exception as e:
-        response_data = {"error": f"Failed to delete FCM token: {str(e)}"}
-        log_response(f"DELETE /clients/{client_id}/fcm-token", response_data, 500)
-        return jsonify(response_data), 500
+        return error_response(f"Failed to delete FCM token: {str(e)}", 500, endpoint)
 

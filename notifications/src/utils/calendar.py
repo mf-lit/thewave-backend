@@ -4,108 +4,77 @@ from typing import Dict, List, Optional
 
 import requests
 
+REQUEST_TIMEOUT = 30
+
+
+def _get_calendar_api_url() -> str:
+    """Get the calendar API base URL from environment."""
+    return os.getenv("CALENDAR_API_URL", "http://localhost:5000/calendar")
+
 
 def fetch_calendar_data(date_from: str, number_of_days: int) -> Dict:
-    """Fetch calendar data from the upstream API.
-
-    Args:
-        date_from: Start date in YYYY-MM-DD format
-        number_of_days: Number of days to fetch
-
-    Returns:
-        Calendar data dictionary with days and performances
-
-    Raises:
-        requests.RequestException: If the API request fails
-    """
-    base_url = os.getenv("CALENDAR_API_URL", "http://localhost:5000/calendar")
-    params = {"dateFrom": date_from, "numberOfDays": number_of_days}
-
-    response = requests.get(base_url, params=params, timeout=30)
+    """Fetch calendar data from the upstream API."""
+    response = requests.get(
+        _get_calendar_api_url(),
+        params={"dateFrom": date_from, "numberOfDays": number_of_days},
+        timeout=REQUEST_TIMEOUT,
+    )
     response.raise_for_status()
     return response.json()
 
 
 def fetch_calendar_data_for_dates(dates: List[str]) -> Dict:
     """Fetch calendar data for specific dates only.
-    
+
     Makes individual API calls for each date to minimize data fetched.
-    Merges the results into a single calendar data structure.
-
-    Args:
-        dates: List of dates in YYYY-MM-DD format to fetch
-
-    Returns:
-        Calendar data dictionary with days and performances for the specified dates
-
-    Raises:
-        requests.RequestException: If any API request fails
     """
     if not dates:
         return {"days": []}
-    
-    # Remove duplicates and sort
+
     unique_dates = sorted(set(dates))
-    
-    # Fetch each date individually (numberOfDays=1)
+    base_url = _get_calendar_api_url()
     all_days = []
-    base_url = os.getenv("CALENDAR_API_URL", "http://localhost:5000/calendar")
-    
+
     for date in unique_dates:
-        params = {"dateFrom": date, "numberOfDays": 1}
-        response = requests.get(base_url, params=params, timeout=30)
+        response = requests.get(base_url, params={"dateFrom": date, "numberOfDays": 1}, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
         data = response.json()
-        
-        # Extract the day data for this specific date
-        days = data.get("days", [])
-        for day in days:
+
+        for day in data.get("days", []):
             if day.get("date") == date:
                 all_days.append(day)
-    
+
     return {"days": all_days}
+
+
+def _normalize_time(time_str: str) -> Optional[str]:
+    """Normalize time to HH:MM format, stripping seconds/milliseconds."""
+    if not time_str:
+        return None
+    parts = time_str.split(":")
+    if len(parts) < 2:
+        return None
+    return f"{parts[0]}:{parts[1]}"
 
 
 def find_performance_by_date_time_side(
     calendar_data: Dict, date: str, time: str, side: str
 ) -> Optional[Dict]:
-    """Find a performance by date, time, and side.
-
-    Args:
-        calendar_data: Calendar data from fetch_calendar_data
-        date: Date in YYYY-MM-DD format
-        time: Time in HH:MM format
-        side: Side identifier ("left", "right", or "none")
-
-    Returns:
-        Performance dictionary if found, None otherwise
-    """
-    # Normalize time format (handle both HH:MM and HH:MM:SS.mmm)
-    time_parts = time.split(":")
-    normalized_time = f"{time_parts[0]}:{time_parts[1]}"
+    """Find a performance by date, time, and side."""
+    normalized_time = _normalize_time(time)
+    if not normalized_time:
+        return None
 
     for day in calendar_data.get("days", []):
         if day.get("date") != date:
             continue
 
         for performance in day.get("performances", []):
-            perf_time = performance.get("time", "")
-            # Normalize performance time (strip milliseconds)
-            if perf_time:
-                perf_time_parts = perf_time.split(":")
-                if len(perf_time_parts) >= 2:
-                    perf_normalized = f"{perf_time_parts[0]}:{perf_time_parts[1]}"
-                else:
-                    continue
-            else:
-                continue
-
+            perf_normalized = _normalize_time(performance.get("time", ""))
             if perf_normalized != normalized_time:
                 continue
 
-            # Check if this performance has the requested side
-            availability_per_product = performance.get("availabilityPerProduct", [])
-            for product in availability_per_product:
+            for product in performance.get("availabilityPerProduct", []):
                 if product.get("side") == side:
                     return performance
 
@@ -113,15 +82,7 @@ def find_performance_by_date_time_side(
 
 
 def find_performance_by_ak(calendar_data: Dict, performance_ak: str) -> Optional[Dict]:
-    """Find a performance by performanceAK.
-
-    Args:
-        calendar_data: Calendar data from fetch_calendar_data
-        performance_ak: Performance identifier (e.g., "TWB.EVN10.PRF1487")
-
-    Returns:
-        Performance dictionary if found, None otherwise
-    """
+    """Find a performance by performanceAK."""
     for day in calendar_data.get("days", []):
         for performance in day.get("performances", []):
             if performance.get("performanceAK") == performance_ak:
@@ -130,48 +91,22 @@ def find_performance_by_ak(calendar_data: Dict, performance_ak: str) -> Optional
 
 
 def extract_availability_by_side(performance: Dict, side: str) -> Optional[int]:
-    """Extract availability count for a specific side from a performance.
-
-    Args:
-        performance: Performance dictionary
-        side: Side identifier ("left", "right", or "none")
-
-    Returns:
-        Availability count if found, None otherwise
-    """
-    availability_per_product = performance.get("availabilityPerProduct", [])
-    for product in availability_per_product:
+    """Extract availability count for a specific side from a performance."""
+    for product in performance.get("availabilityPerProduct", []):
         if product.get("side") == side:
-            availability = product.get("availability", {})
-            return availability.get("available")
+            return product.get("availability", {}).get("available")
     return None
 
 
 def get_performance_title(performance: Dict) -> str:
-    """Get the title of a performance.
-
-    Args:
-        performance: Performance dictionary
-
-    Returns:
-        Performance title or empty string
-    """
-    fields = performance.get("fields", {})
-    return fields.get("title", "")
+    """Get the title of a performance."""
+    return performance.get("fields", {}).get("title", "")
 
 
 def get_notification_dates(notifications: List[Dict]) -> List[str]:
-    """Extract unique dates from notifications.
-    
-    Args:
-        notifications: List of notification dictionaries
-        
-    Returns:
-        List of unique dates in YYYY-MM-DD format
-    """
+    """Extract unique sorted dates from notifications."""
     if not notifications:
         return []
-    
-    dates = [n["date"] for n in notifications if "date" in n and n["date"]]
+    dates = [n["date"] for n in notifications if n.get("date")]
     return sorted(set(dates))
 

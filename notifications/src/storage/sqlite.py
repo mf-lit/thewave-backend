@@ -6,53 +6,37 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+JSON_FIELDS = ("thresholds", "notified_thresholds")
+
 
 class SQLiteStorage:
     """Handles all SQLite operations for notifications."""
 
-    def __init__(self, db_path: str = None):
-        """Initialize SQLite connection.
-
-        Args:
-            db_path: Path to the SQLite database file (defaults to SQLITE_DB_PATH env var or 'notifications.db')
-        """
-        if db_path is None:
-            db_path = os.getenv("SQLITE_DB_PATH", "notifications.db")
-        self.db_path = db_path
+    def __init__(self, db_path: Optional[str] = None):
+        """Initialize SQLite connection."""
+        self.db_path = db_path or os.getenv("SQLITE_DB_PATH", "notifications.db")
         self.conn = None
         self._connect()
 
-    def _connect(self):
+    def _connect(self) -> None:
         """Establish database connection."""
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row  # Enable column access by name
-        # Enable foreign keys
+        self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
 
-    def _dict_from_row(self, row: sqlite3.Row) -> Dict[str, Any]:
-        """Convert a SQLite Row to a dictionary.
-
-        Args:
-            row: SQLite Row object
-
-        Returns:
-            Dictionary representation
-        """
+    def _dict_from_row(self, row: sqlite3.Row) -> Optional[Dict[str, Any]]:
+        """Convert a SQLite Row to a dictionary, parsing JSON fields."""
         if row is None:
             return None
         result = dict(row)
-        # Parse JSON fields
-        if "thresholds" in result and result["thresholds"]:
-            result["thresholds"] = json.loads(result["thresholds"])
-        if "notified_thresholds" in result and result["notified_thresholds"]:
-            result["notified_thresholds"] = json.loads(result["notified_thresholds"])
+        for field in JSON_FIELDS:
+            if field in result and result[field]:
+                result[field] = json.loads(result[field])
         return result
 
-    def ensure_table_exists(self):
+    def ensure_table_exists(self) -> None:
         """Create the notifications table if it doesn't exist."""
         cursor = self.conn.cursor()
-
-        # Create notifications table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS notifications (
                 client_id TEXT NOT NULL,
@@ -70,25 +54,13 @@ class SQLiteStorage:
                 PRIMARY KEY (client_id, notification_id)
             )
         """)
-
-        # Create index on performance_ak for efficient lookups
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_performance_ak
-            ON notifications(performance_ak)
-        """)
-
-        # Create index on date for efficient date-based queries
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_date
-            ON notifications(date)
-        """)
-
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_performance_ak ON notifications(performance_ak)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_date ON notifications(date)")
         self.conn.commit()
 
-    def ensure_clients_table_exists(self):
+    def ensure_clients_table_exists(self) -> None:
         """Create the clients table if it doesn't exist."""
         cursor = self.conn.cursor()
-
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS clients (
                 client_id TEXT PRIMARY KEY,
@@ -96,35 +68,20 @@ class SQLiteStorage:
                 updated_at TEXT NOT NULL
             )
         """)
-
         self.conn.commit()
 
-    def create_notification(
-        self, client_id: str, notification_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Create a new notification.
-
-        Args:
-            client_id: UUID of the client
-            notification_data: Notification data (date, time, side, etc.)
-
-        Returns:
-            Created notification with notification_id
-        """
+    def create_notification(self, client_id: str, notification_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new notification and return the created item."""
         self.ensure_table_exists()
 
         notification_id = str(uuid.uuid4())
         now = datetime.utcnow().isoformat()
+        is_threshold_type = notification_data["notification_type"] == "below_threshold"
+
+        thresholds_json = json.dumps(notification_data["thresholds"]) if is_threshold_type else None
+        notified_thresholds_json = json.dumps([]) if is_threshold_type else None
 
         cursor = self.conn.cursor()
-
-        # Prepare thresholds as JSON
-        thresholds_json = None
-        notified_thresholds_json = None
-        if notification_data["notification_type"] == "below_threshold":
-            thresholds_json = json.dumps(notification_data["thresholds"])
-            notified_thresholds_json = json.dumps([])
-
         cursor.execute(
             """
             INSERT INTO notifications (
@@ -148,10 +105,8 @@ class SQLiteStorage:
                 now,
             ),
         )
-
         self.conn.commit()
 
-        # Return the created item
         item = {
             "client_id": client_id,
             "notification_id": notification_id,
@@ -161,148 +116,79 @@ class SQLiteStorage:
             "side": notification_data["side"],
             "title": notification_data["title"],
             "notification_type": notification_data["notification_type"],
-            "last_checked_availability": notification_data.get(
-                "last_checked_availability"
-            ),
+            "last_checked_availability": notification_data.get("last_checked_availability"),
             "created_at": now,
         }
 
-        if notification_data["notification_type"] == "below_threshold":
+        if is_threshold_type:
             item["thresholds"] = notification_data["thresholds"]
             item["notified_thresholds"] = []
 
         return item
 
     def get_notifications_by_client(self, client_id: str) -> List[Dict[str, Any]]:
-        """Get all notifications for a specific client.
-
-        Args:
-            client_id: UUID of the client
-
-        Returns:
-            List of notifications
-        """
+        """Get all notifications for a specific client."""
         self.ensure_table_exists()
-
         cursor = self.conn.cursor()
-        cursor.execute(
-            "SELECT * FROM notifications WHERE client_id = ?", (client_id,)
-        )
+        cursor.execute("SELECT * FROM notifications WHERE client_id = ?", (client_id,))
+        return [self._dict_from_row(row) for row in cursor.fetchall()]
 
-        rows = cursor.fetchall()
-        return [self._dict_from_row(row) for row in rows]
-
-    def get_notification_by_id(
-        self, client_id: str, notification_id: str
-    ) -> Optional[Dict[str, Any]]:
-        """Get a specific notification by ID.
-
-        Args:
-            client_id: UUID of the client
-            notification_id: UUID of the notification
-
-        Returns:
-            Notification if found, None otherwise
-        """
+    def get_notification_by_id(self, client_id: str, notification_id: str) -> Optional[Dict[str, Any]]:
+        """Get a specific notification by ID."""
         self.ensure_table_exists()
-
         cursor = self.conn.cursor()
         cursor.execute(
             "SELECT * FROM notifications WHERE client_id = ? AND notification_id = ?",
             (client_id, notification_id),
         )
-
         row = cursor.fetchone()
         return self._dict_from_row(row) if row else None
 
     def delete_notification(self, client_id: str, notification_id: str) -> bool:
-        """Delete a notification.
-
-        Args:
-            client_id: UUID of the client
-            notification_id: UUID of the notification
-
-        Returns:
-            True if deleted, False if not found
-        """
+        """Delete a notification. Returns True if deleted, False if not found."""
         self.ensure_table_exists()
-
         cursor = self.conn.cursor()
         cursor.execute(
             "DELETE FROM notifications WHERE client_id = ? AND notification_id = ?",
             (client_id, notification_id),
         )
         self.conn.commit()
-
         return cursor.rowcount > 0
 
-    def update_notification(
-        self, client_id: str, notification_id: str, updates: Dict[str, Any]
-    ) -> bool:
-        """Update a notification.
-
-        Args:
-            client_id: UUID of the client
-            notification_id: UUID of the notification
-            updates: Dictionary of fields to update
-
-        Returns:
-            True if updated, False if not found
-        """
+    def update_notification(self, client_id: str, notification_id: str, updates: Dict[str, Any]) -> bool:
+        """Update a notification. Returns True if updated, False if not found."""
         self.ensure_table_exists()
 
         if not updates:
             return False
 
-        # Build SET clause dynamically
         set_clauses = []
         values = []
 
         for key, value in updates.items():
-            # Handle list fields that need JSON serialization
-            if key in ["thresholds", "notified_thresholds"] and isinstance(value, list):
+            if key in JSON_FIELDS and isinstance(value, list):
                 value = json.dumps(value)
             set_clauses.append(f"{key} = ?")
             values.append(value)
 
-        # Add WHERE clause values
         values.extend([client_id, notification_id])
 
         cursor = self.conn.cursor()
         query = f"UPDATE notifications SET {', '.join(set_clauses)} WHERE client_id = ? AND notification_id = ?"
         cursor.execute(query, values)
         self.conn.commit()
-
         return cursor.rowcount > 0
 
     def get_all_notifications(self) -> List[Dict[str, Any]]:
-        """Get all notifications across all clients (for daemon use).
-
-        Returns:
-            List of all notifications
-        """
+        """Get all notifications across all clients (for daemon use)."""
         self.ensure_table_exists()
-
         cursor = self.conn.cursor()
         cursor.execute("SELECT * FROM notifications")
+        return [self._dict_from_row(row) for row in cursor.fetchall()]
 
-        rows = cursor.fetchall()
-        return [self._dict_from_row(row) for row in rows]
-
-    def create_or_update_client_token(
-        self, client_id: str, fcm_token: str
-    ) -> Dict[str, Any]:
-        """Create or update FCM token for a client.
-
-        Args:
-            client_id: UUID of the client
-            fcm_token: Firebase Cloud Messaging token
-
-        Returns:
-            Client record with fcm_token and updated_at
-        """
+    def create_or_update_client_token(self, client_id: str, fcm_token: str) -> Dict[str, Any]:
+        """Create or update FCM token for a client."""
         self.ensure_clients_table_exists()
-
         now = datetime.utcnow().isoformat()
 
         cursor = self.conn.cursor()
@@ -317,65 +203,32 @@ class SQLiteStorage:
             (client_id, fcm_token, now),
         )
         self.conn.commit()
-
         return {"client_id": client_id, "fcm_token": fcm_token, "updated_at": now}
 
     def get_client_token(self, client_id: str) -> Optional[str]:
-        """Get FCM token for a client.
-
-        Args:
-            client_id: UUID of the client
-
-        Returns:
-            FCM token string if found, None otherwise
-        """
+        """Get FCM token for a client."""
         self.ensure_clients_table_exists()
-
         cursor = self.conn.cursor()
         cursor.execute("SELECT fcm_token FROM clients WHERE client_id = ?", (client_id,))
-
         row = cursor.fetchone()
         return row["fcm_token"] if row else None
 
     def delete_client_token(self, client_id: str) -> bool:
-        """Delete FCM token for a client.
-
-        Args:
-            client_id: UUID of the client
-
-        Returns:
-            True if deleted, False if not found
-        """
+        """Delete FCM token for a client. Returns True if deleted, False if not found."""
         self.ensure_clients_table_exists()
-
         cursor = self.conn.cursor()
         cursor.execute("DELETE FROM clients WHERE client_id = ?", (client_id,))
         self.conn.commit()
-
         return cursor.rowcount > 0
 
-    def get_notifications_by_performance_ak(
-        self, performance_ak: str
-    ) -> List[Dict[str, Any]]:
-        """Get all notifications for a specific performance across all clients.
-
-        Args:
-            performance_ak: Performance identifier
-
-        Returns:
-            List of notifications
-        """
+    def get_notifications_by_performance_ak(self, performance_ak: str) -> List[Dict[str, Any]]:
+        """Get all notifications for a specific performance across all clients."""
         self.ensure_table_exists()
-
         cursor = self.conn.cursor()
-        cursor.execute(
-            "SELECT * FROM notifications WHERE performance_ak = ?", (performance_ak,)
-        )
+        cursor.execute("SELECT * FROM notifications WHERE performance_ak = ?", (performance_ak,))
+        return [self._dict_from_row(row) for row in cursor.fetchall()]
 
-        rows = cursor.fetchall()
-        return [self._dict_from_row(row) for row in rows]
-
-    def close(self):
+    def close(self) -> None:
         """Close the database connection."""
         if self.conn:
             self.conn.close()
