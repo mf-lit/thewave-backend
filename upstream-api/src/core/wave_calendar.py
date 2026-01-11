@@ -67,20 +67,20 @@ def get_calendar(date_from: str, number_of_days: str) -> dict:
 
 def load_test_data() -> dict:
     """
-    Load test data from response.json file.
+    Load test data from data/response.json file.
     This function reads the file fresh on each call (no caching) to allow
-    live editing of response.json during development.
+    live editing of data/response.json during development.
     
     Returns:
-        dict: Parsed JSON data from response.json
+        dict: Parsed JSON data from data/response.json
     
     Raises:
-        FileNotFoundError: If response.json is not found
-        json.JSONDecodeError: If response.json contains invalid JSON
+        FileNotFoundError: If data/response.json is not found
+        json.JSONDecodeError: If data/response.json contains invalid JSON
     """
-    # Get the directory where main.py is located
-    script_dir = Path(__file__).parent
-    response_file = script_dir / "response.json"
+    # Get project root (go up from src/core/ to project root)
+    project_root = Path(__file__).parent.parent.parent
+    response_file = project_root / "data" / "response.json"
     
     if not response_file.exists():
         raise FileNotFoundError(f"Test data file not found: {response_file}")

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Script that periodically modifies response.json by randomly selecting
+Script that periodically modifies data/response.json by randomly selecting
 an availabilityPerProduct availability value and either decreasing it by 1
 (if > 0) or increasing it to 1 (if == 0).
 """
@@ -100,7 +100,7 @@ def find_availability_values(data):
 
 def modify_random_availability(file_path, interval):
     """
-    Main loop that modifies response.json every N seconds.
+    Main loop that modifies data/response.json every N seconds.
     
     Args:
         file_path: Path to response.json file
@@ -184,7 +184,7 @@ def modify_random_availability(file_path, interval):
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description="Modify availability values in response.json periodically"
+        description="Modify availability values in data/response.json periodically"
     )
     parser.add_argument(
         '--interval', '-i',
@@ -196,7 +196,7 @@ def main():
         '--file',
         type=str,
         default=None,
-        help='Path to response.json file (default: response.json in script directory)'
+        help='Path to response.json file (default: data/response.json at project root)'
     )
     
     args = parser.parse_args()
@@ -205,9 +205,10 @@ def main():
     if args.file:
         file_path = Path(args.file)
     else:
-        # Default to response.json in the same directory as the script
-        script_dir = Path(__file__).parent
-        file_path = script_dir / "response.json"
+        # Default to data/response.json at project root
+        # Get project root (go up from scripts/ to project root)
+        project_root = Path(__file__).parent.parent
+        file_path = project_root / "data" / "response.json"
     
     # Validate interval
     if args.interval <= 0:

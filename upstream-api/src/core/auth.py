@@ -50,15 +50,16 @@ def load_api_keys() -> List[str]:
             return _valid_api_keys
     
     # Try to load from config.yaml file
-    script_dir = Path(__file__).parent
-    config_file = script_dir / "config.yaml"
+    # Get project root (go up from src/core/ to project root)
+    project_root = Path(__file__).parent.parent.parent
+    config_file = project_root / "config" / "config.yaml"
     
     if not config_file.exists():
         raise ValueError(
             f"API authentication is required but no API keys found. "
             f"Either:\n"
             f"  1. Set DISABLE_API_AUTH=true to disable authentication, or\n"
-            f"  2. Create config.yaml with API keys, or\n"
+            f"  2. Create config/config.yaml with API keys, or\n"
             f"  3. Set API_KEYS environment variable"
         )
     
@@ -74,26 +75,26 @@ def load_api_keys() -> List[str]:
         
         api_keys = config.get("api_keys", [])
         if not isinstance(api_keys, list):
-            raise ValueError("api_keys must be an array in config.yaml")
+            raise ValueError("api_keys must be an array in config/config.yaml")
         
         # Filter out empty strings and normalize
         _valid_api_keys = [str(key).strip() for key in api_keys if key and str(key).strip()]
         
         if not _valid_api_keys:
             raise ValueError(
-                "API authentication is required but no valid API keys found in config.yaml. "
+                "API authentication is required but no valid API keys found in config/config.yaml. "
                 "Either set DISABLE_API_AUTH=true to disable authentication, or add valid API keys."
             )
         
-        logger.info(f"Loaded {len(_valid_api_keys)} API key(s) from config.yaml")
+        logger.info(f"Loaded {len(_valid_api_keys)} API key(s) from config/config.yaml")
         return _valid_api_keys
     except yaml.YAMLError as e:
-        raise ValueError(f"Failed to parse config.yaml: {str(e)}")
+        raise ValueError(f"Failed to parse config/config.yaml: {str(e)}")
     except ValueError:
         # Re-raise ValueError as-is
         raise
     except Exception as e:
-        raise ValueError(f"Failed to load API keys from config.yaml: {str(e)}")
+        raise ValueError(f"Failed to load API keys from config/config.yaml: {str(e)}")
 
 
 def is_valid_api_key(key: str) -> bool:
