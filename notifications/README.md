@@ -32,6 +32,7 @@ uv sync
 ### Environment Variables
 
 - `CALENDAR_API_URL` - Upstream calendar API URL (default: `http://localhost:5000/calendar`)
+- `CALENDAR_API_KEY` - API key for authenticating with the calendar API (required, passed as `x-api-key` header)
 - `SQLITE_DB_PATH` - Path to SQLite database file (default: `notifications.db`)
 
 ## Usage

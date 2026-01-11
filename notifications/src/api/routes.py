@@ -6,6 +6,7 @@ from typing import Tuple
 
 from flask import Blueprint, jsonify, request
 
+from src.api.auth import require_api_key
 from src.api.models import CreateNotificationRequest, NotificationResponse
 from src.storage.sqlite import SQLiteStorage
 from src.utils.calendar import (
@@ -50,6 +51,7 @@ def success_response(data: dict, status_code: int, endpoint: str) -> Tuple:
 
 
 @bp.route("/clients/<client_id>/notifications", methods=["POST"])
+@require_api_key
 def create_notification(client_id: str):
     """Create a new notification for a client."""
     endpoint = f"POST /clients/{client_id}/notifications"
@@ -113,6 +115,7 @@ def create_notification(client_id: str):
 
 
 @bp.route("/clients/<client_id>/notifications", methods=["GET"])
+@require_api_key
 def list_notifications(client_id: str):
     """List all notifications for a client."""
     endpoint = f"GET /clients/{client_id}/notifications"
@@ -131,6 +134,7 @@ def list_notifications(client_id: str):
 
 
 @bp.route("/clients/<client_id>/notifications/<notification_id>", methods=["DELETE"])
+@require_api_key
 def delete_notification(client_id: str, notification_id: str):
     """Delete a notification."""
     endpoint = f"DELETE /clients/{client_id}/notifications/{notification_id}"
@@ -156,6 +160,7 @@ def delete_notification(client_id: str, notification_id: str):
 
 
 @bp.route("/clients/<client_id>/fcm-token", methods=["PUT"])
+@require_api_key
 def create_or_update_fcm_token(client_id: str):
     """Create or update FCM token for a client."""
     endpoint = f"PUT /clients/{client_id}/fcm-token"
@@ -189,6 +194,7 @@ def create_or_update_fcm_token(client_id: str):
 
 
 @bp.route("/clients/<client_id>/fcm-token", methods=["GET"])
+@require_api_key
 def get_fcm_token(client_id: str):
     """Check if FCM token exists for a client (does not return actual token for security)."""
     endpoint = f"GET /clients/{client_id}/fcm-token"
@@ -208,6 +214,7 @@ def get_fcm_token(client_id: str):
 
 
 @bp.route("/clients/<client_id>/fcm-token", methods=["DELETE"])
+@require_api_key
 def delete_fcm_token(client_id: str):
     """Delete FCM token for a client."""
     endpoint = f"DELETE /clients/{client_id}/fcm-token"

@@ -1,0 +1,8 @@
+# API Keys Configuration
+# Copy this file to config.yaml and add your actual API keys
+# The config.yaml file is gitignored and should not be committed
+
+api_keys:
+  - "your-api-key-1-here"
+  - "your-api-key-2-here"
+  # Add more API keys as needed

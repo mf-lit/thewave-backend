@@ -12,11 +12,22 @@ def _get_calendar_api_url() -> str:
     return os.getenv("CALENDAR_API_URL", "http://localhost:5000/calendar")
 
 
+def _get_calendar_api_key() -> Optional[str]:
+    """Get the calendar API key from environment."""
+    return os.getenv("CALENDAR_API_KEY")
+
+
 def fetch_calendar_data(date_from: str, number_of_days: int) -> Dict:
     """Fetch calendar data from the upstream API."""
+    headers = {}
+    api_key = _get_calendar_api_key()
+    if api_key:
+        headers["x-api-key"] = api_key
+    
     response = requests.get(
         _get_calendar_api_url(),
         params={"dateFrom": date_from, "numberOfDays": number_of_days},
+        headers=headers,
         timeout=REQUEST_TIMEOUT,
     )
     response.raise_for_status()
@@ -34,9 +45,14 @@ def fetch_calendar_data_for_dates(dates: List[str]) -> Dict:
     unique_dates = sorted(set(dates))
     base_url = _get_calendar_api_url()
     all_days = []
+    
+    headers = {}
+    api_key = _get_calendar_api_key()
+    if api_key:
+        headers["x-api-key"] = api_key
 
     for date in unique_dates:
-        response = requests.get(base_url, params={"dateFrom": date, "numberOfDays": 1}, timeout=REQUEST_TIMEOUT)
+        response = requests.get(base_url, params={"dateFrom": date, "numberOfDays": 1}, headers=headers, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
         data = response.json()
 

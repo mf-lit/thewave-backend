@@ -1,9 +1,11 @@
 """Flask application initialization."""
 import logging
+import sys
 
 from flask import Flask
 
 from src.api.routes import bp
+from src.utils.config import validate_config_file
 
 # Configure logging
 logging.basicConfig(
@@ -11,9 +13,18 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 
+logger = logging.getLogger(__name__)
+
 
 def create_app() -> Flask:
     """Create and configure the Flask application."""
+    # Validate config file at startup (unless auth is disabled)
+    try:
+        validate_config_file()
+    except (FileNotFoundError, ValueError) as e:
+        logger.error(f"Configuration validation failed: {e}")
+        sys.exit(1)
+    
     app = Flask(__name__)
     app.register_blueprint(bp)
 
