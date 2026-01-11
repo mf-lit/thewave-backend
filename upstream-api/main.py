@@ -35,10 +35,11 @@ TEST_MODE = os.getenv("TEST_MODE", "").lower() in ("true", "1", "yes")
 
 # In-memory cache: {cache_key: {"data": dict, "timestamp": float, "expires": float}}
 _cache: dict[str, dict] = {}
-# Water temperature cache: {cache_key: {"data": float, "timestamp": float, "expires": float}}
-_water_temp_cache: dict[str, dict] = {}
-# Lock to prevent concurrent water temperature scraping
-_water_temp_lock = threading.Lock()
+# Weather cache: {cache_key: {"data": dict, "timestamp": float, "expires": float}}
+# Data format: {"water_temp": float, "air_temp": float, "conditions": str}
+_weather_cache: dict[str, dict] = {}
+# Lock to prevent concurrent weather scraping
+_weather_lock = threading.Lock()
 
 # Cache TTL in seconds (default: 600, configurable via CACHE_TTL_SECONDS env var)
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "600"))
@@ -62,19 +63,19 @@ def check_authentication():
 
 
 
-def get_water_temperature() -> float:
+def get_wave_weather() -> tuple[float, float, str]:
     """
-    Fetch water temperature from the website by scraping.
+    Fetch water temperature, air temperature, and weather conditions from the website by scraping.
     
     Returns:
-        float: Water temperature in degrees
+        tuple[float, float, str]: (water_temp, air_temp, conditions)
     """
     url = "https://www.thewave.com/"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36"
     }
     
-    logger.info("Scraping water temperature from website")
+    logger.info("Scraping weather data from website")
     response = requests.get(url, headers=headers)
     response.raise_for_status()
     
@@ -86,6 +87,34 @@ def get_water_temperature() -> float:
     
     water_temp = float(re.sub("[^0-9.]", "", marker.text.strip()))
     logger.info(f"Water temperature scraped: {water_temp}")
+
+    try:
+        air_temp_element = marker.find_previous("p")
+    except AttributeError:
+        raise ValueError("Could not find air temperature marker on page")
+    air_temp = float(re.sub("[^0-9.]", "", air_temp_element.text.strip()))
+    logger.info(f"Air temperature scraped: {air_temp}")
+    
+    try:
+        conditions_element = air_temp_element.find_previous("p")
+    except AttributeError:
+        raise ValueError("Could not find conditions marker on page")
+
+    conditions = conditions_element.text.strip().rstrip(" &")
+    logger.info(f"Conditions scraped: {conditions}")
+
+    return water_temp, air_temp, conditions
+
+
+def get_water_temperature() -> float:
+    """
+    Fetch water temperature from the website by scraping.
+    Uses get_wave_weather() and extracts just the water temperature.
+    
+    Returns:
+        float: Water temperature in degrees
+    """
+    water_temp, _, _ = get_wave_weather()
     return water_temp
 
 
@@ -102,9 +131,9 @@ def _get_next_hour_timestamp() -> float:
     return next_hour.timestamp()
 
 
-def _is_water_temp_cache_valid(cache_entry: dict) -> bool:
+def _is_weather_cache_valid(cache_entry: dict) -> bool:
     """
-    Check if a water temperature cache entry is still valid (until next hour).
+    Check if a weather cache entry is still valid (until next hour).
     
     Args:
         cache_entry: Cache entry with "data", "timestamp", and "expires" keys
@@ -118,35 +147,42 @@ def _is_water_temp_cache_valid(cache_entry: dict) -> bool:
     return current_time < cache_entry["expires"]
 
 
-def _get_water_temp_from_cache() -> tuple[float, float] | None:
+def _get_weather_from_cache() -> tuple[dict, float] | None:
     """
-    Retrieve water temperature from cache if it exists and is still valid.
+    Retrieve weather data from cache if it exists and is still valid.
     
     Returns:
-        tuple[float, float] | None: (Cached temperature, expiration time) if valid, None otherwise
+        tuple[dict, float] | None: (Cached weather data, expiration time) if valid, None otherwise
+        Weather data format: {"water_temp": float, "air_temp": float, "conditions": str}
     """
-    cache_key = "water_temperature"
-    cache_entry = _water_temp_cache.get(cache_key)
-    if cache_entry and _is_water_temp_cache_valid(cache_entry):
+    cache_key = "weather"
+    cache_entry = _weather_cache.get(cache_key)
+    if cache_entry and _is_weather_cache_valid(cache_entry):
         return (cache_entry["data"], cache_entry["expires"])
     # Remove expired entry
-    if cache_key in _water_temp_cache:
-        del _water_temp_cache[cache_key]
+    if cache_key in _weather_cache:
+        del _weather_cache[cache_key]
     return None
 
 
-def _store_water_temp_in_cache(temperature: float) -> None:
+def _store_weather_in_cache(water_temp: float, air_temp: float, conditions: str) -> None:
     """
-    Store water temperature in cache with expiration at the start of the next hour.
+    Store weather data in cache with expiration at the start of the next hour.
     
     Args:
-        temperature: Water temperature to store
+        water_temp: Water temperature to store
+        air_temp: Air temperature to store
+        conditions: Weather conditions string to store
     """
-    cache_key = "water_temperature"
+    cache_key = "weather"
     timestamp = time.time()
     expires = _get_next_hour_timestamp()
-    _water_temp_cache[cache_key] = {
-        "data": temperature,
+    _weather_cache[cache_key] = {
+        "data": {
+            "water_temp": water_temp,
+            "air_temp": air_temp,
+            "conditions": conditions
+        },
         "timestamp": timestamp,
         "expires": expires
     }
@@ -322,27 +358,65 @@ def water_temperature_endpoint():
     Returns:
         JSON response with a single float value
     """
-    cached_result = _get_water_temp_from_cache()
+    cached_result = _get_weather_from_cache()
     if cached_result is not None:
-        temperature, _expires = cached_result
-        return jsonify(temperature)
+        weather_data, _expires = cached_result
+        return jsonify(weather_data["water_temp"])
 
     # Use lock to prevent concurrent scraping (double-check pattern)
-    with _water_temp_lock:
-        cached_result = _get_water_temp_from_cache()
+    with _weather_lock:
+        cached_result = _get_weather_from_cache()
         if cached_result is not None:
-            temperature, _expires = cached_result
-            return jsonify(temperature)
+            weather_data, _expires = cached_result
+            return jsonify(weather_data["water_temp"])
         
         # Fetch from upstream
         try:
-            temperature = get_water_temperature()
+            water_temp, air_temp, conditions = get_wave_weather()
             # Store in cache
-            _store_water_temp_in_cache(temperature)
-            return jsonify(temperature)
+            _store_weather_in_cache(water_temp, air_temp, conditions)
+            return jsonify(water_temp)
         except (requests.exceptions.RequestException, ValueError) as e:
             logger.error(f"Water temperature scrape failed: {str(e)}")
             return jsonify({"error": f"Failed to fetch water temperature: {str(e)}"}), 500
+
+
+@app.route("/wave-weather", methods=["GET"])
+def wave_weather_endpoint():
+    """
+    GET /wave-weather endpoint that returns water temperature, air temperature, and conditions.
+    The data is cached until the start of the next hour.
+    
+    Returns:
+        JSON response with water_temp, air_temp, and conditions
+    """
+    cached_result = _get_weather_from_cache()
+    if cached_result is not None:
+        weather_data, expires = cached_result
+        return jsonify(_format_response_with_expires(weather_data, expires))
+
+    # Use lock to prevent concurrent scraping (double-check pattern)
+    with _weather_lock:
+        cached_result = _get_weather_from_cache()
+        if cached_result is not None:
+            weather_data, _expires = cached_result
+            return jsonify(_format_response_with_expires(weather_data, _expires))
+        
+        # Fetch from upstream
+        try:
+            water_temp, air_temp, conditions = get_wave_weather()
+            # Store in cache
+            _store_weather_in_cache(water_temp, air_temp, conditions)
+            weather_data = {
+                "water_temp": water_temp,
+                "air_temp": air_temp,
+                "conditions": conditions
+            }
+            expires = _get_next_hour_timestamp()
+            return jsonify(_format_response_with_expires(weather_data, expires))
+        except (requests.exceptions.RequestException, ValueError) as e:
+            logger.error(f"Weather scrape failed: {str(e)}")
+            return jsonify({"error": f"Failed to fetch weather data: {str(e)}"}), 500
 
 
 # Initialize scheduler for daily archive task (only when app runs, not at import time)

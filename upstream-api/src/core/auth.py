@@ -144,7 +144,8 @@ def require_api_key():
     
     if not api_key:
         logger.warning(f"Authentication failed: Missing x-api-key header from {request.remote_addr}")
-        return jsonify({"error": "Missing x-api-key header"}), 403
+        from flask import Response
+        return Response(status=403)
     
     if not is_valid_api_key(api_key):
         logger.warning(f"Authentication failed: Invalid API key from {request.remote_addr}")
