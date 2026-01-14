@@ -1,8 +1,14 @@
 """Calendar API client for fetching session availability data."""
+import logging
 import os
 from typing import Dict, List, Optional
 
 import requests
+import yaml
+
+from .config import get_config_path
+
+logger = logging.getLogger(__name__)
 
 REQUEST_TIMEOUT = 30
 
@@ -13,8 +19,33 @@ def _get_calendar_api_url() -> str:
 
 
 def _get_calendar_api_key() -> Optional[str]:
-    """Get the calendar API key from environment."""
-    return os.getenv("CALENDAR_API_KEY")
+    """Get the calendar API key from environment or config file.
+    
+    First checks the CALENDAR_API_KEY environment variable.
+    If unset, loads from config/config.yaml under key 'calendar_api_key'.
+    """
+    # First check environment variable
+    api_key = os.getenv("CALENDAR_API_KEY")
+    if api_key:
+        return api_key
+    
+    # Fall back to config file
+    try:
+        config_path = get_config_path()
+        
+        if config_path.exists():
+            with open(config_path, "r") as f:
+                config = yaml.safe_load(f)
+            
+            if config:
+                api_key = config.get("calendar_api_key")
+                if api_key:
+                    logger.debug("Loaded calendar API key from config file")
+                    return api_key
+    except Exception as e:
+        logger.warning(f"Failed to load calendar API key from config file: {e}")
+    
+    return None
 
 
 def fetch_calendar_data(date_from: str, number_of_days: int) -> Dict:
