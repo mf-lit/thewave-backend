@@ -1,16 +1,16 @@
-import bs4 as bs
-import requests
-import re
+"""
+Example script demonstrating how to use the weather module.
+This file is kept for reference but the actual weather functionality
+has been moved to src/core/weather.py
+"""
 
+from src.core.weather import get_water_temperature, get_wave_weather
 
-url = "https://www.thewave.com/"
-headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36"
-}
+# Example: Get just the water temperature
+water_temp = get_water_temperature()
+print(f"Water temperature: {water_temp}°F")
 
-response = requests.get(url, headers=headers)
-soup = bs.BeautifulSoup(response.content, "html5lib")
-
-marker = soup.find("p", string=re.compile("Water:.*"))
-water_temp = float(re.sub("[^0-9.]", "", marker.text.strip()))
+# Example: Get full weather data (water temp, air temp, conditions)
+water_temp, air_temp, conditions = get_wave_weather()
+print(f"Water: {water_temp}°F, Air: {air_temp}°F, Conditions: {conditions}")
 
