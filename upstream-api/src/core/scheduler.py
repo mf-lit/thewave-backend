@@ -15,8 +15,8 @@ def record_water_temperature():
     This function is called hourly.
     """
     # Lazy imports to avoid circular import issues
-    from weather import get_water_temperature
-    from water_temp_db import store_water_temperature
+    from src.core.weather import get_water_temperature
+    from src.core.water_temp_db import store_water_temperature
 
     # Check if test mode is enabled (skip in test mode)
     test_mode = os.getenv("TEST_MODE", "").lower() in ("true", "1", "yes")
@@ -50,8 +50,8 @@ def _check_and_archive_day(date: str) -> bool:
         bool: True if file now exists (either already existed or was successfully created), False otherwise
     """
     # Lazy imports to avoid circular import issues
-    from history import save_daily_history, load_historical_day
-    from wave_calendar import get_calendar, add_side_to_availability
+    from src.core.history import save_daily_history, load_historical_day
+    from src.core.wave_calendar import get_calendar, add_side_to_availability
 
     # Check if file already exists
     if load_historical_day(date) is not None:
@@ -79,8 +79,8 @@ def archive_today_response():
     This function is called daily at 23:59.
     """
     # Lazy imports to avoid circular import issues
-    from history import save_daily_history
-    from wave_calendar import get_calendar, add_side_to_availability
+    from src.core.history import save_daily_history
+    from src.core.wave_calendar import get_calendar, add_side_to_availability
 
     # Check if test mode is enabled (history only works in production)
     test_mode = os.getenv("TEST_MODE", "").lower() in ("true", "1", "yes")
@@ -133,7 +133,7 @@ def setup_daily_archive_task(app: Flask):
     # Lazy import APScheduler to avoid circular import issues
     from apscheduler.schedulers.background import BackgroundScheduler
     from apscheduler.triggers.cron import CronTrigger
-    from water_temp_db import init_database
+    from src.core.water_temp_db import init_database
     import atexit
 
     global _scheduler
