@@ -174,6 +174,7 @@ def calendar_endpoint():
         logger.info(f"Test mode enabled: using dummy data for dateFrom={date_from}, numberOfDays={number_of_days}")
         try:
             test_data = load_test_data()
+            # Add side field before returning (test data is always fresh, not cached)
             response_data = transform_dates_in_response(test_data, date_from, number_of_days_str)
             response_data = add_side_to_availability(response_data)
             expires = time.time() + 3600
@@ -189,8 +190,8 @@ def calendar_endpoint():
 
         if requested_date < today:
             logger.info(f"Requesting historical data for dateFrom={date_from}, numberOfDays={number_of_days}")
+            # Historical data is pre-processed with side field already added
             response_data = build_multi_day_response(date_from, number_of_days)
-            response_data = add_side_to_availability(response_data)
             expires = time.time() + 3600
             return jsonify(_format_response_with_expires(response_data, expires))
     except ValueError as e:
@@ -205,16 +206,17 @@ def calendar_endpoint():
         cached_result = _get_from_cache(cache_key)
         if cached_result is not None:
             cached_data, expires = cached_result
-            cached_data = add_side_to_availability(cached_data)
+            # Cached data already has side field added
             return jsonify(_format_response_with_expires(cached_data, expires))
-    
+
     # Fetch from upstream API
     try:
         response_data = get_calendar(date_from, number_of_days_str)
         # Normalize response to ensure proper structure (handles "No schedule data available" cases)
         response_data = normalize_calendar_response(response_data, date_from, number_of_days)
-        _store_in_cache(cache_key, response_data)
+        # Add side field before caching
         response_data = add_side_to_availability(response_data)
+        _store_in_cache(cache_key, response_data)
         expires = time.time() + CACHE_TTL_SECONDS
         return jsonify(_format_response_with_expires(response_data, expires))
     except requests.exceptions.RequestException as e:

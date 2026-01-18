@@ -5,7 +5,9 @@
       "Bash(python main.py:*)",
       "Bash(mv:*)",
       "Bash(uv sync)",
-      "Bash(timeout 3 uv run:*)"
+      "Bash(timeout 3 uv run:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(python:*)"
     ]
   }
 }

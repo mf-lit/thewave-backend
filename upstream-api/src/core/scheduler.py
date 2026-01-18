@@ -12,26 +12,28 @@ _scheduler = None
 def _check_and_archive_day(date: str) -> bool:
     """
     Check if a historical file exists for a date, and if not, fetch and save it.
-    
+
     Args:
         date: Date in YYYY-MM-DD format
-    
+
     Returns:
         bool: True if file now exists (either already existed or was successfully created), False otherwise
     """
     # Lazy imports to avoid circular import issues
     from history import save_daily_history, load_historical_day
-    from wave_calendar import get_calendar
-    
+    from wave_calendar import get_calendar, add_side_to_availability
+
     # Check if file already exists
     if load_historical_day(date) is not None:
         logger.info(f"Historical file already exists for {date}, skipping")
         return True
-    
+
     # File doesn't exist, try to fetch and save it
     try:
         logger.info(f"Missing historical file for {date}, attempting to fetch and save")
         response_data = get_calendar(date, "1")
+        # Add side field before saving to history
+        response_data = add_side_to_availability(response_data)
         save_daily_history(date, response_data)
         logger.info(f"Successfully archived missing historical data for {date}")
         return True
@@ -48,14 +50,14 @@ def archive_today_response():
     """
     # Lazy imports to avoid circular import issues
     from history import save_daily_history
-    from wave_calendar import get_calendar
-    
+    from wave_calendar import get_calendar, add_side_to_availability
+
     # Check if test mode is enabled (history only works in production)
     test_mode = os.getenv("TEST_MODE", "").lower() in ("true", "1", "yes")
     if test_mode:
         logger.info("Skipping daily archive - test mode is enabled")
         return
-    
+
     try:
         today = datetime.now()
         today_str = today.strftime("%Y-%m-%d")
@@ -63,10 +65,13 @@ def archive_today_response():
 
         # Fetch today's data from upstream API (single day)
         response_data = get_calendar(today_str, "1")
-        
+
+        # Add side field before saving to history
+        response_data = add_side_to_availability(response_data)
+
         # Save to history
         save_daily_history(today_str, response_data)
-        
+
         logger.info(f"Successfully archived daily response for {today_str}")
         
         # Check and backfill previous 6 days
