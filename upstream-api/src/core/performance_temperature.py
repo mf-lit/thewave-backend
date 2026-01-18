@@ -164,7 +164,7 @@ def _get_predicted_temperature(target_time: datetime) -> float | None:
 
         # Look up the forecast for this hour
         if next_hour in forecast_data:
-            temp = forecast_data[next_hour]
+            temp = round(forecast_data[next_hour], 1)
             logger.debug(f"Found predicted temperature {temp}°C for {next_hour.isoformat()}")
             return temp
         else:
@@ -237,7 +237,7 @@ def add_temperature_to_performances(data: dict) -> dict:
                                 if perf_time <= now + timedelta(days=7):
                                     predicted_temp = _get_predicted_temperature(perf_time)
                                     if predicted_temp is not None:
-                                        performance["predicted_water_temp"] = predicted_temp
+                                        performance["predictedWaterTemp"] = predicted_temp
                                         logger.info(
                                             f"Added predicted temperature {predicted_temp}°C to performance "
                                             f"{performance.get('performanceAK', 'unknown')}"
@@ -250,7 +250,7 @@ def add_temperature_to_performances(data: dict) -> dict:
                         # Get current temperature for ongoing performances
                         temp = _get_current_temperature()
                         if temp is not None:
-                            performance["water_temperature"] = temp
+                            performance["waterTemperature"] = temp
                             logger.info(
                                 f"Added current temperature {temp}°C to performance "
                                 f"{performance.get('performanceAK', 'unknown')}"
@@ -263,7 +263,7 @@ def add_temperature_to_performances(data: dict) -> dict:
                                 perf_time = _parse_performance_datetime(date_str, time_str)
                                 temp = _get_temperature_for_time(perf_time)
                                 if temp is not None:
-                                    performance["water_temperature"] = temp
+                                    performance["waterTemperature"] = temp
                                     logger.info(
                                         f"Added historical temperature {temp}°C to performance "
                                         f"{performance.get('performanceAK', 'unknown')}"

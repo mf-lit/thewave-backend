@@ -19,7 +19,8 @@ def get_calendar(date_from: str, number_of_days: str) -> dict:
     Returns:
         dict: JSON response from the API as a dictionary
     """
-    url = "https://ticketing-api.thewave.com/api/twb-prod/b2c/v1/events/calendar"
+    # url = "https://ticketing-api.thewave.com/api/twb-prod/b2c/v1/events/calendar"
+    url = "http://localhost:5005/api/twb-prod/b2c/v1/events/calendar"
     
     # Query parameters - handle array parameters as list of tuples
     # For array parameters like eventCategoryCode[], pass multiple tuples with same key
