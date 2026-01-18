@@ -9,6 +9,36 @@ logger = logging.getLogger(__name__)
 _scheduler = None
 
 
+def record_water_temperature():
+    """
+    Fetch current water temperature and store it in the database.
+    This function is called hourly.
+    """
+    # Lazy imports to avoid circular import issues
+    from weather import get_water_temperature
+    from water_temp_db import store_water_temperature
+
+    # Check if test mode is enabled (skip in test mode)
+    test_mode = os.getenv("TEST_MODE", "").lower() in ("true", "1", "yes")
+    if test_mode:
+        logger.info("Skipping water temperature recording - test mode is enabled")
+        return
+
+    try:
+        logger.info("Starting hourly water temperature recording")
+
+        # Fetch current water temperature
+        temperature = get_water_temperature()
+
+        # Store in database
+        record_id = store_water_temperature(temperature)
+
+        logger.info(f"Successfully recorded water temperature: {temperature}°C (ID: {record_id})")
+
+    except Exception as e:
+        logger.error(f"Failed to record water temperature: {str(e)}", exc_info=True)
+
+
 def _check_and_archive_day(date: str) -> bool:
     """
     Check if a historical file exists for a date, and if not, fetch and save it.
@@ -95,25 +125,29 @@ def archive_today_response():
 
 def setup_daily_archive_task(app: Flask):
     """
-    Initialize APScheduler and schedule daily archive task at 23:59.
-    
+    Initialize APScheduler and schedule daily archive task at 23:59 and hourly water temperature recording.
+
     Args:
         app: Flask application instance
     """
     # Lazy import APScheduler to avoid circular import issues
     from apscheduler.schedulers.background import BackgroundScheduler
     from apscheduler.triggers.cron import CronTrigger
+    from water_temp_db import init_database
     import atexit
-    
+
     global _scheduler
-    
+
     if _scheduler is not None:
         logger.warning("Scheduler already initialized, skipping setup")
         return
-    
+
+    # Initialize water temperature database
+    init_database()
+
     _scheduler = BackgroundScheduler()
-    
-    # Schedule task to run daily at 23:59
+
+    # Schedule daily archive task to run at 23:59
     _scheduler.add_job(
         func=archive_today_response,
         trigger=CronTrigger(hour=23, minute=59),
@@ -121,9 +155,20 @@ def setup_daily_archive_task(app: Flask):
         name="Daily archive of API response",
         replace_existing=True
     )
-    
+
+    # Schedule hourly water temperature recording at the top of each hour
+    _scheduler.add_job(
+        func=record_water_temperature,
+        trigger=CronTrigger(minute=0),
+        id="hourly_water_temp",
+        name="Hourly water temperature recording",
+        replace_existing=True
+    )
+
     _scheduler.start()
-    logger.info("Daily archive scheduler started (runs at 23:59 each day)")
-    
+    logger.info("Scheduler started:")
+    logger.info("  - Daily archive runs at 23:59 each day")
+    logger.info("  - Water temperature recording runs at the top of each hour")
+
     # Ensure scheduler shuts down when app exits
     atexit.register(lambda: _scheduler.shutdown() if _scheduler else None)
