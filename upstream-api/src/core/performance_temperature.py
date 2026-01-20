@@ -2,6 +2,7 @@ import logging
 import os
 import csv
 from datetime import datetime, timedelta
+from functools import lru_cache
 from typing import Literal
 
 logger = logging.getLogger(__name__)
@@ -11,6 +12,19 @@ FORECAST_CSV_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
     "latest.csv"
 )
+
+# Forecast cache: stores loaded data and metadata
+_forecast_cache: dict = {
+    "data": {},           # dict[datetime, float] - the forecast data
+    "loaded_at": None,    # datetime when data was loaded
+    "loaded_date": None,  # date for which the data was loaded (to detect day change)
+}
+
+# Hour at which to reload forecast data daily (24-hour format)
+FORECAST_RELOAD_HOUR = int(os.getenv("FORECAST_RELOAD_HOUR", "1"))
+
+# LRU cache size for historical temperature lookups
+HISTORICAL_TEMP_CACHE_SIZE = int(os.getenv("HISTORICAL_TEMP_CACHE_SIZE", "256"))
 
 
 def _parse_performance_datetime(date_str: str, time_str: str) -> datetime:
@@ -64,18 +78,21 @@ def _get_performance_status(performance: dict, now: datetime) -> Literal["past",
         return "future"
 
 
-def _get_temperature_for_time(target_time: datetime) -> float | None:
+@lru_cache(maxsize=HISTORICAL_TEMP_CACHE_SIZE)
+def _get_temperature_for_time_cached(target_time_iso: str) -> float | None:
     """
-    Get the water temperature for a specific time.
+    Get the water temperature for a specific time (cached version).
     Looks for the closest temperature reading in the database.
 
     Args:
-        target_time: The time to get temperature for
+        target_time_iso: ISO format string of the target time (for cache key hashability)
 
     Returns:
         float | None: Temperature if found, None otherwise
     """
     from src.core.water_temp_db import get_temperature_history
+
+    target_time = datetime.fromisoformat(target_time_iso)
 
     # Get temperatures within +/- 2 hours of target time
     start_time = target_time - timedelta(hours=2)
@@ -88,7 +105,7 @@ def _get_temperature_for_time(target_time: datetime) -> float | None:
     )
 
     if not temperatures:
-        logger.debug(f"No temperature data found near {target_time.isoformat()}")
+        logger.debug(f"No temperature data found near {target_time_iso}")
         return None
 
     # Find the closest temperature reading
@@ -99,13 +116,70 @@ def _get_temperature_for_time(target_time: datetime) -> float | None:
         )
     )
 
-    logger.debug(f"Found temperature {closest['temperature']}°C for {target_time.isoformat()}")
+    logger.debug(f"Found temperature {closest['temperature']}°C for {target_time_iso}")
     return closest["temperature"]
 
 
-def _load_forecast_data() -> dict[datetime, float]:
+def _get_temperature_for_time(target_time: datetime) -> float | None:
     """
-    Load forecast data from latest.csv.
+    Get the water temperature for a specific time.
+    Results are cached using LRU cache since historical data doesn't change.
+
+    Args:
+        target_time: The time to get temperature for
+
+    Returns:
+        float | None: Temperature if found, None otherwise
+    """
+    return _get_temperature_for_time_cached(target_time.isoformat())
+
+
+def _should_reload_forecast(now: datetime) -> bool:
+    """
+    Determine if forecast data should be reloaded.
+
+    Reload conditions:
+    1. No data loaded yet (first request)
+    2. Day has changed AND we're past the reload hour
+    3. Data was loaded on a previous day and we missed the reload time
+
+    Args:
+        now: Current datetime
+
+    Returns:
+        bool: True if forecast should be reloaded
+    """
+    loaded_at = _forecast_cache["loaded_at"]
+    loaded_date = _forecast_cache["loaded_date"]
+
+    # Never loaded - need to load
+    if loaded_at is None or loaded_date is None:
+        return True
+
+    today = now.date()
+    current_hour = now.hour
+
+    # Same day - no reload needed
+    if loaded_date == today:
+        return False
+
+    # Different day - check if we should reload
+    # Reload if: we're past the reload hour today, OR
+    # the data is from more than 1 day ago (missed reload)
+    if current_hour >= FORECAST_RELOAD_HOUR:
+        return True
+
+    # Before reload hour but data is stale (more than 1 day old)
+    days_old = (today - loaded_date).days
+    if days_old > 1:
+        return True
+
+    return False
+
+
+def _load_forecast_data_from_file() -> dict[datetime, float]:
+    """
+    Load forecast data directly from latest.csv file.
 
     Returns:
         dict[datetime, float]: Dictionary mapping datetime (hour) to predicted water temperature
@@ -136,6 +210,27 @@ def _load_forecast_data() -> dict[datetime, float]:
         logger.error(f"Error loading forecast data: {e}")
 
     return forecast_data
+
+
+def _load_forecast_data() -> dict[datetime, float]:
+    """
+    Get forecast data, loading from file if needed.
+
+    Data is cached and reloaded once per day at FORECAST_RELOAD_HOUR (default 01:00).
+    If the reload time is missed (e.g., server was down), data will be loaded on next request.
+
+    Returns:
+        dict[datetime, float]: Dictionary mapping datetime (hour) to predicted water temperature
+    """
+    now = datetime.now()
+
+    if _should_reload_forecast(now):
+        logger.info(f"Reloading forecast data (reload hour: {FORECAST_RELOAD_HOUR:02d}:00)")
+        _forecast_cache["data"] = _load_forecast_data_from_file()
+        _forecast_cache["loaded_at"] = now
+        _forecast_cache["loaded_date"] = now.date()
+
+    return _forecast_cache["data"]
 
 
 def _get_predicted_temperature(target_time: datetime) -> float | None:

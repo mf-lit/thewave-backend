@@ -13,8 +13,34 @@ Example:
     Will fetch from upstream with dateFrom=2026-01-28 (shifted by 10 days)
 """
 
-import argparse
+# Fix for "code for hash blake2b was not found" error
+# This is a known issue with Python/OpenSSL on some systems (especially macOS)
+# The error is logged but doesn't prevent the program from running
 import logging
+
+# Suppress the specific error message from hashlib
+class Blake2bErrorFilter(logging.Filter):
+    def filter(self, record):
+        return 'blake2b' not in record.getMessage().lower()
+
+# Apply filter to root logger to catch the error
+logging.getLogger().addFilter(Blake2bErrorFilter())
+
+# Also try to patch hashlib to prevent the error from occurring
+try:
+    import hashlib
+    # Pre-emptively try to load blake2b to see if it's available
+    # If it fails, we'll catch it here rather than in dependencies
+    try:
+        _ = hashlib.blake2b
+    except (AttributeError, ValueError, OSError):
+        # blake2b is not available, which is fine - we don't need it
+        pass
+except Exception:
+    # If there's any error, ignore it - dependencies will handle it
+    pass
+
+import argparse
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 from flask_cors import CORS
