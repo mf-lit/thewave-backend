@@ -1,5 +1,5 @@
-# Use Python 3.11 slim image as base
-FROM python:3.11-slim
+# Use Python 3.12 slim image as base
+FROM python:3.12-slim
 
 # Install system dependencies and create non-root user
 RUN apt-get update && \
