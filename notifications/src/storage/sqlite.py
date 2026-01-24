@@ -4,6 +4,7 @@ import os
 import sqlite3
 import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 JSON_FIELDS = ("thresholds", "notified_thresholds")
@@ -14,7 +15,10 @@ class SQLiteStorage:
 
     def __init__(self, db_path: Optional[str] = None):
         """Initialize SQLite connection."""
-        self.db_path = db_path or os.getenv("SQLITE_DB_PATH", "notifications.db")
+        self.db_path = db_path or os.getenv("SQLITE_DB_PATH", "data/notifications.db")
+        # Ensure the data directory exists
+        db_path_obj = Path(self.db_path)
+        db_path_obj.parent.mkdir(parents=True, exist_ok=True)
         self.conn = None
         self._connect()
 

@@ -27,12 +27,9 @@ MANIFEST
 venv/
 env/
 ENV/
-.venv
-.ENV
-
-# UV
+.venv/
+.ENV/
 .uv/
-uv.lock
 
 # IDE
 .vscode/
@@ -50,19 +47,7 @@ uv.lock
 # Logs
 *.log
 logs/
-.cursor/debug.log
-
-# Firebase credentials
-*.json
-!response.json
-!pyproject.toml
-google_application_credentials.json
-
-# Local development
-localstack/
-*.db
-*.sqlite
-*.sqlite3
+.cursor/
 
 # Testing
 .pytest_cache/
@@ -79,33 +64,26 @@ dmypy.json
 # Jupyter Notebook
 .ipynb_checkpoints
 
-# pyenv
-.python-version
+# Git
+.git/
+.gitignore
 
-# Celery
-celerybeat-schedule
-celerybeat.pid
+# Documentation
+README.md
+*.md
+!FCM_TOKEN_API.md
 
-# SageMath parsed files
-*.sage.py
+# Scripts (not needed in container)
+scripts/
 
-# Spyder project settings
-.spyderproject
-.spyproject
+# Data directory (will be created as volume or mounted)
+data/
 
-# Rope project settings
-.ropeproject
+# Local development
+localstack/
 
-# mkdocs documentation
-/site
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre type checker
-.pyre/
-
-# Config files with sensitive data
+# Config files with sensitive data (should be mounted as volumes)
 config/config.yaml
+
+# Firebase credentials (should be mounted as volume)
+google_application_credentials.json

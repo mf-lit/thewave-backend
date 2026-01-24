@@ -33,7 +33,7 @@ uv sync
 
 - `CALENDAR_API_URL` - Upstream calendar API URL (default: `http://localhost:5000/calendar`)
 - `CALENDAR_API_KEY` - API key for authenticating with the calendar API (required, passed as `x-api-key` header)
-- `SQLITE_DB_PATH` - Path to SQLite database file (default: `notifications.db`)
+- `SQLITE_DB_PATH` - Path to SQLite database file (default: `data/notifications.db`)
 
 ## Usage
 
@@ -140,7 +140,7 @@ This will:
 2. Fetch all notifications and client tokens
 3. Create SQLite database tables
 4. Migrate all data to SQLite
-5. Save the database to `notifications.db`
+5. Save the database to `data/notifications.db`
 
 **Note**: The migration script does not delete data from DynamoDB. You can safely run it multiple times.
 
