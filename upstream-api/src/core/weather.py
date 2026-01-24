@@ -73,7 +73,7 @@ def _store_weather_in_cache(water_temp: float, air_temp: float, conditions: str,
         retrieved_at: Timestamp when weather was retrieved. If None, uses current time.
     """
     cache_key = "weather"
-    timestamp = round(retrieved_at if retrieved_at is not None else time.time())
+    timestamp = retrieved_at if retrieved_at is not None else time.time()
     expires = _get_next_hour_timestamp()
     _weather_cache[cache_key] = {
         "data": {
@@ -170,7 +170,7 @@ def fetch_and_cache_weather() -> tuple[dict, float]:
         
         # Fetch from upstream
         water_temp, air_temp, conditions = get_wave_weather()
-        retrieved_at = round(time.time())
+        retrieved_at = time.time()
         # Store in cache
         _store_weather_in_cache(water_temp, air_temp, conditions, retrieved_at)
         

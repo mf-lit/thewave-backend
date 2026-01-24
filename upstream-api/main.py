@@ -13,8 +13,10 @@ from src.core.wave_calendar import (
     get_calendar,
     load_test_data,
     transform_dates_in_response,
-    add_side_to_availability
+    add_side_to_availability,
+    load_upstream_api_url
 )
+import src.core.wave_calendar as wave_calendar
 
 from src.core.history import build_multi_day_response, normalize_calendar_response
 from src.core.performance_temperature import add_temperature_to_performances
@@ -51,6 +53,11 @@ except ValueError as e:
     logger.error(f"Failed to start: {str(e)}")
     print(f"\nERROR: {str(e)}\n", file=sys.stderr)
     sys.exit(1)
+
+# Load upstream API URL at startup (from env var, config.yaml, or default)
+load_upstream_api_url()
+# Access the URL through the module to get the updated value
+logger.info(f"Upstream API URL: {wave_calendar.UPSTREAM_API_URL}")
 
 # Register authentication check for all requests
 @app.before_request
@@ -193,10 +200,9 @@ def calendar_endpoint():
 
         if requested_date < today:
             logger.info(f"Requesting historical data for dateFrom={date_from}, numberOfDays={number_of_days}")
-            # Historical data is pre-processed with side field already added
+            # Historical data is pre-processed with side field and temperatures already added during archiving
             response_data = build_multi_day_response(date_from, number_of_days)
-            # Add water temperature to performances based on timing
-            response_data = add_temperature_to_performances(response_data)
+            # No need to add temperatures - they're already in the archived files
             expires = time.time() + 3600
             return jsonify(_format_response_with_expires(response_data, expires))
     except ValueError as e:

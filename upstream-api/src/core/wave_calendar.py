@@ -1,11 +1,73 @@
 import json
 import logging
 import copy
+import os
 from pathlib import Path
 from datetime import datetime, timedelta
 import requests
+import yaml
 
 logger = logging.getLogger(__name__)
+
+# Default upstream API URL
+_DEFAULT_UPSTREAM_API_URL = "https://ticketing-api.thewave.com/api/twb-prod/b2c/v1/events/calendar"
+
+# Global variable to store the upstream API URL (loaded at startup)
+UPSTREAM_API_URL = _DEFAULT_UPSTREAM_API_URL
+
+
+def load_upstream_api_url() -> str:
+    """
+    Load upstream API URL from environment variable or config.yaml file.
+    
+    Priority:
+    1. UPSTREAM_API_URL environment variable
+    2. config.yaml file (upstream_api field)
+    3. Default hardcoded URL
+    
+    Returns:
+        str: Upstream API URL
+    """
+    global UPSTREAM_API_URL
+    
+    # Check environment variable first
+    env_url = os.getenv("UPSTREAM_API_URL", "").strip()
+    if env_url:
+        UPSTREAM_API_URL = env_url
+        logger.info(f"Using upstream API URL from UPSTREAM_API_URL environment variable: {env_url}")
+        return env_url
+    
+    # Try to load from config.yaml file
+    project_root = Path(__file__).parent.parent.parent
+    config_file = project_root / "config" / "config.yaml"
+    
+    if config_file.exists():
+        try:
+            with open(config_file, "r", encoding="utf-8") as f:
+                config = yaml.safe_load(f)
+            
+            if config and isinstance(config, dict):
+                upstream_api = config.get("upstream_api")
+                if upstream_api is not None:
+                    # Handle both string and None cases, strip whitespace and quotes
+                    upstream_api = str(upstream_api).strip().strip('"').strip("'")
+                    if upstream_api:
+                        UPSTREAM_API_URL = upstream_api
+                        logger.info(f"Using upstream API URL from config.yaml: {upstream_api}")
+                        return upstream_api
+                else:
+                    logger.debug(f"upstream_api field not found or is None in config.yaml")
+            else:
+                logger.debug(f"Config file exists but is not a valid dictionary")
+        except (yaml.YAMLError, Exception) as e:
+            logger.warning(f"Failed to load upstream_api from config.yaml: {str(e)}, using default")
+    else:
+        logger.debug(f"Config file not found at {config_file}")
+    
+    # Use default
+    UPSTREAM_API_URL = _DEFAULT_UPSTREAM_API_URL
+    logger.info(f"Using default upstream API URL: {_DEFAULT_UPSTREAM_API_URL}")
+    return _DEFAULT_UPSTREAM_API_URL
 
 
 def get_calendar(date_from: str, number_of_days: str) -> dict:
@@ -19,8 +81,7 @@ def get_calendar(date_from: str, number_of_days: str) -> dict:
     Returns:
         dict: JSON response from the API as a dictionary
     """
-    # url = "https://ticketing-api.thewave.com/api/twb-prod/b2c/v1/events/calendar"
-    url = "http://localhost:5005/api/twb-prod/b2c/v1/events/calendar"
+    url = UPSTREAM_API_URL
     
     # Query parameters - handle array parameters as list of tuples
     # For array parameters like eventCategoryCode[], pass multiple tuples with same key

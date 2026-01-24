@@ -1,3 +1,8 @@
 api_keys:
   - your-api-key-here
   - another-api-key-if-needed
+
+# Optional: Override the upstream API URL
+# If not set, defaults to: https://ticketing-api.thewave.com/api/twb-prod/b2c/v1/events/calendar
+# Can also be set via UPSTREAM_API_URL environment variable (takes precedence over this)
+# upstream_api: http://localhost:5005/api/twb-prod/b2c/v1/events/calendar
