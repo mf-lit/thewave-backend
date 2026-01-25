@@ -298,8 +298,6 @@ if __name__ == "__main__":
     _init_scheduler()
     app.run(debug=True, host="0.0.0.0", port=int(os.getenv("PORT", "5000")))
 else:
-    # For production (gunicorn, etc.), initialize scheduler after app creation
-    # Use Flask's before_first_request or app context
-    @app.before_first_request
-    def init_scheduler_on_first_request():
-        _init_scheduler()
+    # For production (gunicorn, etc.), initialize scheduler when app is created
+    # The app object is already created at this point, so we can initialize directly
+    _init_scheduler()
