@@ -15,7 +15,7 @@ trap cleanup SIGTERM SIGINT
 # Start the API server in the background
 echo "Starting API server..."
 # Use gunicorn for production (via UV run to use the correct environment)
-uv run gunicorn -w 2 -b 0.0.0.0:5001 --access-logfile - --error-logfile - "src.api.app:create_app()" &
+uv run gunicorn -w 2 -b 0.0.0.0:5001 --access-logfile - --error-logfile - "src.api.app:create_app" &
 api_pid=$!
 
 # Start the daemon scheduler in the background

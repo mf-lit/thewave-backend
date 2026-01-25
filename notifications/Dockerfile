@@ -12,9 +12,6 @@ COPY pyproject.toml uv.lock* ./
 # Install dependencies using UV
 RUN uv sync --frozen --no-dev
 
-# Install gunicorn for production WSGI server (in UV environment)
-RUN uv run pip install gunicorn
-
 # Copy application code
 COPY src/ ./src/
 # COPY config/ ./config/
