@@ -88,12 +88,35 @@ The upstream API URL can be configured via:
 
 The configured URL is logged at application startup.
 
+### History Directory
+
+The history directory (where daily archived responses are stored) can be configured via:
+
+1. **Environment variable** (highest priority):
+   ```bash
+   export HISTORY_DIR="/path/to/history"
+   ```
+
+2. **config.yaml**:
+   ```yaml
+   history_dir: "/path/to/history"
+   ```
+   Or relative to project root:
+   ```yaml
+   history_dir: "custom/history"
+   ```
+
+3. **Default**: `data/history` (relative to project root)
+
+The configured directory is logged at application startup.
+
 ### Environment Variables
 
 - `TEST_MODE`: Enable test mode (uses `data/response.json`)
 - `DISABLE_API_AUTH`: Disable authentication (default: false)
 - `API_KEYS`: Comma-separated list of API keys (alternative to config.yaml)
 - `UPSTREAM_API_URL`: Override upstream API URL (alternative to config.yaml)
+- `HISTORY_DIR`: Override history directory path (alternative to config.yaml)
 - `CACHE_TTL_SECONDS`: Cache TTL in seconds (default: 600)
 - `FORECAST_RELOAD_HOUR`: Hour to reload forecast data daily, 0-23 (default: 1 = 01:00)
 - `HISTORICAL_TEMP_CACHE_SIZE`: LRU cache size for historical temperature lookups (default: 256)

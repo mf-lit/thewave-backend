@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 # Path to forecast CSV file
 FORECAST_CSV_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-    "latest.csv"
+    "data/latest.csv"
 )
 
 # Forecast cache: stores loaded data and metadata

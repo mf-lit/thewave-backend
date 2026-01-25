@@ -6,3 +6,10 @@ api_keys:
 # If not set, defaults to: https://ticketing-api.thewave.com/api/twb-prod/b2c/v1/events/calendar
 # Can also be set via UPSTREAM_API_URL environment variable (takes precedence over this)
 # upstream_api: http://localhost:5005/api/twb-prod/b2c/v1/events/calendar
+
+# Optional: Override the history directory path
+# If not set, defaults to: data/history (relative to the project root)
+# Can also be set via HISTORY_DIR environment variable (takes precedence over this)
+# Can be an absolute path or relative to the project root
+# history_dir: /path/to/history
+# history_dir: custom/history

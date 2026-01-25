@@ -1,22 +1,73 @@
 import json
 import logging
+import os
 from pathlib import Path
 from datetime import datetime, timedelta
 import copy
+import yaml
 
 logger = logging.getLogger(__name__)
+
+# Global variable to cache the history directory path
+_history_dir: Path | None = None
 
 
 def _get_history_dir() -> Path:
     """
     Get the history directory path.
     
+    Priority:
+    1. HISTORY_DIR environment variable
+    2. config.yaml file (history_dir field)
+    3. Default: data/history (relative to project root)
+    
     Returns:
         Path: Path to the history directory
     """
-    script_dir = Path(__file__).parent
-    history_dir = script_dir / "history"
-    return history_dir
+    global _history_dir
+    
+    # Return cached value if available
+    if _history_dir is not None:
+        return _history_dir
+    
+    # Check environment variable first
+    env_dir = os.getenv("HISTORY_DIR", "").strip()
+    if env_dir:
+        _history_dir = Path(env_dir).resolve()
+        logger.info(f"Using history directory from HISTORY_DIR environment variable: {_history_dir}")
+        return _history_dir
+    
+    # Try to load from config.yaml file
+    project_root = Path(__file__).parent.parent.parent
+    config_file = project_root / "config" / "config.yaml"
+    
+    if config_file.exists():
+        try:
+            with open(config_file, "r", encoding="utf-8") as f:
+                config = yaml.safe_load(f)
+            
+            if config and isinstance(config, dict):
+                history_dir_config = config.get("history_dir")
+                if history_dir_config is not None:
+                    # Handle both string and None cases, strip whitespace and quotes
+                    history_dir_str = str(history_dir_config).strip().strip('"').strip("'")
+                    if history_dir_str:
+                        _history_dir = Path(history_dir_str).resolve()
+                        logger.info(f"Using history directory from config.yaml: {_history_dir}")
+                        return _history_dir
+                else:
+                    logger.debug("history_dir field not found or is None in config.yaml")
+            else:
+                logger.debug("Config file exists but is not a valid dictionary")
+        except (yaml.YAMLError, Exception) as e:
+            logger.warning(f"Failed to load history_dir from config.yaml: {str(e)}, using default")
+    else:
+        logger.debug(f"Config file not found at {config_file}")
+    
+    # Use default: data/history (relative to project root)
+    _history_dir = project_root / "data" / "history"
+    logger.info(f"Using default history directory: {_history_dir}")
+    return _history_dir
 
 
 def normalize_calendar_response(data: dict, date_from: str, number_of_days: int = 1) -> dict:
