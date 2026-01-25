@@ -17,10 +17,10 @@ RUN uv run pip install gunicorn
 
 # Copy application code
 COPY src/ ./src/
-COPY config/ ./config/
+# COPY config/ ./config/
 
 # Create data directory for SQLite database
-RUN mkdir -p data
+# RUN mkdir -p data
 
 # Copy startup script
 COPY docker-entrypoint.sh ./
@@ -31,7 +31,7 @@ EXPOSE 5001
 
 # Set environment variables defaults
 ENV PYTHONUNBUFFERED=1
-ENV CALENDAR_API_URL=http://localhost:5000/calendar
+ENV CALENDAR_API_URL=http://thewave-upstream-api:5000/calendar
 ENV SQLITE_DB_PATH=data/notifications.db
 ENV FLASK_ENV=production
 
