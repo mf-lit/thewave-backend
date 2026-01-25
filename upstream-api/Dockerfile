@@ -24,8 +24,8 @@ RUN uv pip install --system --no-cache .
 # Copy application code
 COPY main.py ./
 COPY src/ ./src/
-COPY config/ ./config/
-COPY data/ ./data/
+# COPY config/ ./config/
+# COPY data/ ./data/
 
 # Change ownership to non-root user
 RUN chown -R appuser:appuser /app
@@ -43,8 +43,8 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV FLASK_ENV=production
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:5000/water-temperature || exit 1
+# HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    # CMD curl -f http://localhost:5000/water-temperature || exit 1
 
 # Run the application using gunicorn (production WSGI server)
 CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "4", "--threads", "2", "--timeout", "120", "--access-logfile", "-", "--error-logfile", "-", "main:app"]
