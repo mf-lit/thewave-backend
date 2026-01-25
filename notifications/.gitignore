@@ -109,3 +109,4 @@ dmypy.json
 
 # Config files with sensitive data
 config/config.yaml
+config/google_application_credentials.json

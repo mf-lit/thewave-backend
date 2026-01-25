@@ -17,7 +17,7 @@ _firebase_app: Optional[firebase_admin.App] = None
 
 def _get_credentials_path() -> str:
     """Get the Firebase credentials file path."""
-    creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "google_application_credentials.json")
+    creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "config/google_application_credentials.json")
 
     if os.path.isabs(creds_path):
         return creds_path
