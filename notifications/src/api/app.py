@@ -36,7 +36,10 @@ def create_app() -> Flask:
     return app
 
 
+# Create the application instance for WSGI servers (like gunicorn)
+app = create_app()
+
+
 if __name__ == "__main__":
-    app = create_app()
     app.run(host="0.0.0.0", port=5001, debug=True)
 
