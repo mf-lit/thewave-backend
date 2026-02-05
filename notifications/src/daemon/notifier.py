@@ -5,7 +5,7 @@ import os
 from typing import Dict, Optional
 
 import firebase_admin
-from firebase_admin import credentials, messaging
+from firebase_admin import credentials, exceptions, messaging
 
 from src.storage.sqlite import SQLiteStorage
 
@@ -106,9 +106,12 @@ def send_notification(
             f"Message ID: {response}. Session: {session_title} ({notification.get('date')} {notification.get('time')})"
         )
     except messaging.UnregisteredError:
-        logger.warning(f"FCM token for client {client_id} is invalid. Deleting token.")
+        logger.warning(f"FCM token for client {client_id} is unregistered. Deleting token.")
         storage.delete_client_token(client_id)
-    except messaging.InvalidArgumentError as e:
+    except messaging.SenderIdMismatchError:
+        logger.warning(f"FCM token for client {client_id} belongs to a different Firebase project. Deleting token.")
+        storage.delete_client_token(client_id)
+    except exceptions.InvalidArgumentError as e:
         logger.error(f"Invalid argument when sending FCM notification to client {client_id}: {e}")
     except Exception as e:
         logger.error(f"Failed to send FCM notification to client {client_id}: {e}", exc_info=True)
