@@ -96,7 +96,11 @@ def send_notification(
     data_payload = _build_data_payload(notification, availability, threshold)
     logger.info(f"Sending FCM data-only message to client {client_id} with payload: {json.dumps(data_payload, indent=2)}")
 
-    fcm_message = messaging.Message(data=data_payload, token=fcm_token)
+    fcm_message = messaging.Message(
+        data=data_payload,
+        token=fcm_token,
+        android=messaging.AndroidConfig(priority='high'),
+    )
 
     try:
         response = messaging.send(fcm_message)
