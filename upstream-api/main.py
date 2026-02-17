@@ -20,6 +20,7 @@ import src.core.wave_calendar as wave_calendar
 
 from src.core.history import build_multi_day_response, normalize_calendar_response
 from src.core.performance_temperature import add_temperature_to_performances
+from src.core.performance_floodlights import add_floodlights_to_performances
 from src.core.auth import load_api_keys, require_api_key
 from src.core.weather import (
     get_cached_weather,
@@ -187,6 +188,7 @@ def calendar_endpoint():
             response_data = add_side_to_availability(response_data)
             # Add water temperature to performances based on timing
             response_data = add_temperature_to_performances(response_data)
+            response_data = add_floodlights_to_performances(response_data)
             expires = time.time() + 3600
             return jsonify(_format_response_with_expires(response_data, expires))
         except (FileNotFoundError, json.JSONDecodeError) as e:
@@ -220,6 +222,7 @@ def calendar_endpoint():
             # Cached data already has side field added
             # Add water temperature to performances (not cached, as it's time-dependent)
             cached_data = add_temperature_to_performances(cached_data)
+            cached_data = add_floodlights_to_performances(cached_data)
             return jsonify(_format_response_with_expires(cached_data, expires))
 
     # Fetch from upstream API
@@ -232,6 +235,7 @@ def calendar_endpoint():
         _store_in_cache(cache_key, response_data)
         # Add water temperature to performances (after caching, as it's time-dependent)
         response_data = add_temperature_to_performances(response_data)
+        response_data = add_floodlights_to_performances(response_data)
         expires = time.time() + CACHE_TTL_SECONDS
         return jsonify(_format_response_with_expires(response_data, expires))
     except requests.exceptions.RequestException as e:
