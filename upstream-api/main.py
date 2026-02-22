@@ -22,6 +22,7 @@ from src.core.history import build_multi_day_response, normalize_calendar_respon
 from src.core.performance_temperature import add_temperature_to_performances
 from src.core.performance_floodlights import add_floodlights_to_performances
 from src.core.auth import load_api_keys, require_api_key
+from src.core.client_tracker import init_client_tracking, track_client
 from src.core.weather import (
     get_cached_weather,
     fetch_and_cache_weather
@@ -55,6 +56,9 @@ except ValueError as e:
     print(f"\nERROR: {str(e)}\n", file=sys.stderr)
     sys.exit(1)
 
+# Initialize client tracking table
+init_client_tracking()
+
 # Load upstream API URL at startup (from env var, config.yaml, or default)
 load_upstream_api_url()
 # Access the URL through the module to get the updated value
@@ -66,7 +70,15 @@ def check_authentication():
     """Check x-api-key header on all requests."""
     return require_api_key()
 
-
+@app.before_request
+def track_client_id():
+    """Track client usage via optional X-Client-ID header."""
+    client_id = request.headers.get("X-Client-ID")
+    if client_id:
+        try:
+            track_client(client_id)
+        except Exception as e:
+            logger.error(f"Failed to track client {client_id}: {e}")
 
 
 
