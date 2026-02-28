@@ -7,7 +7,7 @@ from src.core.performance_temperature import _parse_performance_datetime
 
 logger = logging.getLogger(__name__)
 
-OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
+SUNRISE_SUNSET_URL = "https://api.sunrisesunset.io/json"
 
 # Cache sunrise/sunset times per date indefinitely: {"YYYY-MM-DD": {"sunrise": datetime, "sunset": datetime}}
 _sun_times_cache: dict[str, dict] = {}
@@ -27,19 +27,23 @@ def _get_sun_times(date_str: str) -> dict | None:
         return _sun_times_cache[date_str]
 
     try:
-        response = requests.get(OPEN_METEO_URL, params={
-            "latitude": 51.54418,
-            "longitude": -2.61459,
-            "daily": "sunrise,sunset",
+        response = requests.get(SUNRISE_SUNSET_URL, params={
+            "lat": 51.54418,
+            "lng": -2.61459,
+            "date": date_str,
             "timezone": "Europe/London",
-            "start_date": date_str,
-            "end_date": date_str,
+            "time_format": "24",
         })
         response.raise_for_status()
         data = response.json()
 
-        sunrise = datetime.strptime(data["daily"]["sunrise"][0], "%Y-%m-%dT%H:%M")
-        sunset = datetime.strptime(data["daily"]["sunset"][0], "%Y-%m-%dT%H:%M")
+        if data.get("status") != "OK":
+            logger.warning(f"SunriseSunset API returned status: {data.get('status')} for {date_str}")
+            return None
+
+        results = data["results"]
+        sunrise = datetime.strptime(f"{date_str}T{results['sunrise']}", "%Y-%m-%dT%H:%M:%S")
+        sunset = datetime.strptime(f"{date_str}T{results['sunset']}", "%Y-%m-%dT%H:%M:%S")
 
         result = {"sunrise": sunrise, "sunset": sunset}
         _sun_times_cache[date_str] = result
