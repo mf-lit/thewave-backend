@@ -333,7 +333,7 @@ def add_temperature_to_performances(data: dict) -> dict:
                                     predicted_temp = _get_predicted_temperature(perf_time)
                                     if predicted_temp is not None:
                                         performance["predictedWaterTemp"] = predicted_temp
-                                        logger.info(
+                                        logger.debug(
                                             f"Added predicted temperature {predicted_temp}°C to performance "
                                             f"{performance.get('performanceAK', 'unknown')}"
                                         )
