@@ -64,6 +64,15 @@ load_upstream_api_url()
 # Access the URL through the module to get the updated value
 logger.info(f"Upstream API URL: {wave_calendar.UPSTREAM_API_URL}")
 
+# Pre-initialize upstream API authenticated session (downloads WASM + fetches CSRF token)
+if not TEST_MODE:
+    from src.core.upstream_auth import get_authenticated_session
+    try:
+        get_authenticated_session()
+        logger.info("Upstream API authenticated session initialized")
+    except Exception as e:
+        logger.warning(f"Failed to pre-initialize upstream auth session (will retry on first request): {e}")
+
 # Register authentication check for all requests
 @app.before_request
 def check_authentication():

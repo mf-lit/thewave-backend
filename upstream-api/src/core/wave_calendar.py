@@ -4,13 +4,12 @@ import copy
 import os
 from pathlib import Path
 from datetime import datetime, timedelta
-import requests
 import yaml
 
 logger = logging.getLogger(__name__)
 
 # Default upstream API URL
-_DEFAULT_UPSTREAM_API_URL = "https://ticketing-api.thewave.com/api/twb-prod/b2c/v1/events/calendar"
+_DEFAULT_UPSTREAM_API_URL = "https://ticketing-api.thewave.com/api/twb-prod*base/b2c/v1/events/calendar"
 
 # Global variable to store the upstream API URL (loaded at startup)
 UPSTREAM_API_URL = _DEFAULT_UPSTREAM_API_URL
@@ -72,58 +71,39 @@ def load_upstream_api_url() -> str:
 
 def get_calendar(date_from: str, number_of_days: str) -> dict:
     """
-    Fetch calendar events from the upstream API.
-    
+    Fetch calendar events from the upstream API using authenticated session.
+
     Args:
         date_from: Start date in YYYY-MM-DD format
         number_of_days: Number of days to fetch (as string)
-    
+
     Returns:
         dict: JSON response from the API as a dictionary
     """
+    from src.core.upstream_auth import get_authenticated_session, reset_session
+
     url = UPSTREAM_API_URL
-    
-    # Query parameters - handle array parameters as list of tuples
-    # For array parameters like eventCategoryCode[], pass multiple tuples with same key
-    params = [
-        ("locale", "en-GB"),
-        ("eventCategoryCode[]", "TWBB2C"),
-        ("eventCategoryCode[]", "ALL2"),
-        ("dateFrom", date_from),
-        ("numberOfDays", number_of_days)
-    ]
-    
-    # Headers
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:142.0) Gecko/20100101 Firefox/142.0",
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "en-US,en;q=0.5",
-        "Accept-Encoding": "gzip, deflate, br, zstd",
-        "X-API-KEY": "42",
-        "Origin": "https://ticketing.thewave.com",
-        "Connection": "keep-alive",
-        "Referer": "https://ticketing.thewave.com/",
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "same-site",
-        "DNT": "1",
-        "Sec-GPC": "1"
+    params = {
+        "locale": "en-GB",
+        "dateFrom": date_from,
+        "numberOfDays": number_of_days,
     }
-    
-    # Log upstream API call
+
     logger.info(f"Calling upstream API: dateFrom={date_from}, numberOfDays={number_of_days}")
-    
-    # Make the request
-    # Note: requests automatically handles compression (equivalent to --compressed)
-    response = requests.get(url, params=params, headers=headers)
-    
-    # Log response status
+
+    session = get_authenticated_session()
+    response = session.get(url, params=params)
+
+    # Re-authenticate once on 401/403 (token may have expired)
+    if response.status_code in (401, 403):
+        logger.warning(f"Upstream API returned {response.status_code}, re-authenticating")
+        reset_session()
+        session = get_authenticated_session()
+        response = session.get(url, params=params)
+
     logger.info(f"Upstream API response: status_code={response.status_code}, dateFrom={date_from}, numberOfDays={number_of_days}")
-    
-    # Raise an error for bad status codes
     response.raise_for_status()
-    
-    # Return JSON response (API always returns JSON)
+
     return response.json()
 
 
