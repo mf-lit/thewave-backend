@@ -12,6 +12,7 @@ from pathlib import Path
 
 import requests
 import wasmtime
+import yaml
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,38 @@ WASM_PATH = Path(__file__).parent.parent.parent / "data" / "a.wasm"
 # Module-level cached session
 _session: requests.Session | None = None
 
+# Proxy config loaded from config.yaml
+_proxies: dict | None = None
+
+
+def _load_proxy_config() -> dict | None:
+    """Load proxy URL from config.yaml and return a requests-compatible proxies dict."""
+    global _proxies
+    if _proxies is not None:
+        return _proxies if _proxies else None
+
+    config_file = Path(__file__).parent.parent.parent / "config" / "config.yaml"
+    if not config_file.exists():
+        _proxies = {}
+        return None
+
+    try:
+        with open(config_file, "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        proxy_url = config.get("proxy", "").strip() if isinstance(config, dict) else ""
+    except Exception as e:
+        logger.warning(f"Failed to load proxy config: {e}")
+        _proxies = {}
+        return None
+
+    if proxy_url:
+        _proxies = {"http": proxy_url, "https": proxy_url}
+        logger.info(f"Using HTTP proxy: {proxy_url}")
+        return _proxies
+
+    _proxies = {}
+    return None
+
 
 def _download_wasm() -> None:
     """Download the WASM module if not already cached locally."""
@@ -33,7 +66,8 @@ def _download_wasm() -> None:
         return
     logger.info(f"Downloading WASM module from {WASM_URL}")
     WASM_PATH.parent.mkdir(parents=True, exist_ok=True)
-    resp = requests.get(WASM_URL, timeout=10)
+    proxies = _load_proxy_config()
+    resp = requests.get(WASM_URL, timeout=10, proxies=proxies)
     resp.raise_for_status()
     WASM_PATH.write_bytes(resp.content)
     logger.info(f"WASM module saved to {WASM_PATH}")
@@ -74,6 +108,9 @@ def _create_session() -> requests.Session:
     process_token = _make_csrf_processor()
 
     session = requests.Session()
+    proxies = _load_proxy_config()
+    if proxies:
+        session.proxies.update(proxies)
     session.headers.update({
         "User-Agent": (
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
