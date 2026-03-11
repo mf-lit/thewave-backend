@@ -88,7 +88,9 @@ def track_client_id():
     client_id = request.headers.get("X-Client-ID")
     if client_id:
         try:
-            track_client(client_id)
+            client_os = request.headers.get("X-Client-OS")
+            client_version = request.headers.get("X-Client-Version")
+            track_client(client_id, client_os=client_os, client_version=client_version)
         except Exception as e:
             logger.error(f"Failed to track client {client_id}: {e}")
 

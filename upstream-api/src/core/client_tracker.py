@@ -23,6 +23,14 @@ def init_client_tracking() -> None:
             conn.execute("ALTER TABLE clients ADD COLUMN days_count INTEGER NOT NULL DEFAULT 1")
         except Exception:
             pass
+        try:
+            conn.execute("ALTER TABLE clients ADD COLUMN \"client-os\" TEXT")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE clients ADD COLUMN \"client-version\" TEXT")
+        except Exception:
+            pass
         logger.info("Client tracking table initialized")
 
 
@@ -35,7 +43,7 @@ def _is_valid_uuid(value: str) -> bool:
         return False
 
 
-def track_client(client_uuid: str) -> None:
+def track_client(client_uuid: str, client_os: str | None = None, client_version: str | None = None) -> None:
     """Upsert a client record, setting first_seen on insert and updating last_seen."""
     if not _is_valid_uuid(client_uuid):
         logger.warning(f"Ignoring invalid client UUID: {client_uuid}")
@@ -45,14 +53,16 @@ def track_client(client_uuid: str) -> None:
 
     with get_db_connection() as conn:
         conn.execute("""
-            INSERT INTO clients (uuid, first_seen, last_seen, request_count, days_count)
-            VALUES (?, ?, ?, 1, 1)
+            INSERT INTO clients (uuid, first_seen, last_seen, request_count, days_count, "client-os", "client-version")
+            VALUES (?, ?, ?, 1, 1, ?, ?)
             ON CONFLICT(uuid) DO UPDATE SET
                 last_seen = excluded.last_seen,
                 request_count = request_count + 1,
                 days_count = days_count + CASE
                     WHEN date(clients.last_seen) != date(excluded.last_seen) THEN 1
                     ELSE 0
-                END
-        """, (client_uuid, now, now))
+                END,
+                "client-os" = COALESCE(excluded."client-os", clients."client-os"),
+                "client-version" = COALESCE(excluded."client-version", clients."client-version")
+        """, (client_uuid, now, now, client_os, client_version))
     logger.info(f"Tracked client: {client_uuid}")
