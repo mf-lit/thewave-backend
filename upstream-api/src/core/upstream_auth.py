@@ -8,7 +8,7 @@ Auth flow:
 """
 
 import logging
-import time
+import os
 from pathlib import Path
 
 import requests
@@ -27,15 +27,10 @@ WASM_PATH = Path(__file__).parent.parent.parent / "data" / "a.wasm"
 
 # Module-level cached session
 _session: requests.Session | None = None
-_session_ip: str | None = None
+_session_flag: str | None = None
 
 # Proxy config loaded from config.yaml
 _proxies: dict | None = None
-
-# Cached external IP
-_cached_ip: str | None = None
-_cached_ip_time: float = 0
-_IP_CACHE_TTL = 600  # 10 minutes
 
 
 def _load_proxy_config() -> dict | None:
@@ -146,45 +141,39 @@ def _create_session() -> requests.Session:
     return session
 
 
-def get_external_ip() -> str | None:
-    """Fetch external IP from canhazip.com, cached for 10 minutes."""
-    global _cached_ip, _cached_ip_time
-    now = time.monotonic()
-    if _cached_ip is not None and (now - _cached_ip_time) < _IP_CACHE_TTL:
-        return _cached_ip
+def _read_flag_file() -> str | None:
+    """Read the first line of the OVPN flag file."""
+    flag_path = os.environ.get("OVPN_FLAG_FILE")
+    if not flag_path:
+        return None
     try:
-        proxies = _load_proxy_config()
-        resp = requests.get("https://canhazip.com", timeout=5, proxies=proxies)
-        resp.raise_for_status()
-        _cached_ip = resp.text.strip()
-        _cached_ip_time = now
-        logger.info(f"External IP: {_cached_ip}")
-        return _cached_ip
+        with open(flag_path, "r", encoding="utf-8") as f:
+            return f.read().strip()
     except Exception as e:
-        logger.warning(f"Failed to fetch external IP: {e}")
-        return _cached_ip
+        logger.warning(f"Failed to read OVPN flag file {flag_path}: {e}")
+        return None
 
 
 def get_authenticated_session(force_refresh: bool = False) -> requests.Session:
     """Return a cached authenticated session, creating one if needed.
 
-    Re-authenticates automatically if the external IP has changed.
+    Re-authenticates automatically if the OVPN flag file value has changed.
     """
-    global _session, _session_ip
-    current_ip = get_external_ip()
+    global _session, _session_flag
+    current_flag = _read_flag_file()
     if _session is not None and not force_refresh:
-        if current_ip is not None and current_ip != _session_ip:
-            logger.info(f"External IP changed from {_session_ip} to {current_ip}, re-authenticating")
+        if current_flag is not None and current_flag != _session_flag:
+            logger.info(f"OVPN flag changed from {_session_flag!r} to {current_flag!r}, re-authenticating")
             force_refresh = True
     if _session is None or force_refresh:
         logger.info("Creating new authenticated upstream session")
         _session = _create_session()
-        _session_ip = current_ip
+        _session_flag = current_flag
     return _session
 
 
 def reset_session() -> None:
     """Clear the cached session, forcing re-authentication on next use."""
-    global _session, _session_ip
+    global _session, _session_flag
     _session = None
-    _session_ip = None
+    _session_flag = None

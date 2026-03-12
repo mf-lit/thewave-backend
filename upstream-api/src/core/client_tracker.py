@@ -24,11 +24,22 @@ def init_client_tracking() -> None:
         except Exception:
             pass
         try:
-            conn.execute("ALTER TABLE clients ADD COLUMN \"client-os\" TEXT")
+            conn.execute("ALTER TABLE clients ADD COLUMN client_os TEXT")
         except Exception:
             pass
         try:
-            conn.execute("ALTER TABLE clients ADD COLUMN \"client-version\" TEXT")
+            conn.execute("ALTER TABLE clients ADD COLUMN client_version TEXT")
+        except Exception:
+            pass
+        # Migrate old hyphenated column names to underscores
+        try:
+            conn.execute('UPDATE clients SET client_os = "client-os" WHERE client_os IS NULL AND "client-os" IS NOT NULL')
+            conn.execute('ALTER TABLE clients DROP COLUMN "client-os"')
+        except Exception:
+            pass
+        try:
+            conn.execute('UPDATE clients SET client_version = "client-version" WHERE client_version IS NULL AND "client-version" IS NOT NULL')
+            conn.execute('ALTER TABLE clients DROP COLUMN "client-version"')
         except Exception:
             pass
         logger.info("Client tracking table initialized")
@@ -53,7 +64,7 @@ def track_client(client_uuid: str, client_os: str | None = None, client_version:
 
     with get_db_connection() as conn:
         conn.execute("""
-            INSERT INTO clients (uuid, first_seen, last_seen, request_count, days_count, "client-os", "client-version")
+            INSERT INTO clients (uuid, first_seen, last_seen, request_count, days_count, client_os, client_version)
             VALUES (?, ?, ?, 1, 1, ?, ?)
             ON CONFLICT(uuid) DO UPDATE SET
                 last_seen = excluded.last_seen,
@@ -62,7 +73,7 @@ def track_client(client_uuid: str, client_os: str | None = None, client_version:
                     WHEN date(clients.last_seen) != date(excluded.last_seen) THEN 1
                     ELSE 0
                 END,
-                "client-os" = COALESCE(excluded."client-os", clients."client-os"),
-                "client-version" = COALESCE(excluded."client-version", clients."client-version")
+                client_os = COALESCE(excluded.client_os, clients.client_os),
+                client_version = COALESCE(excluded.client_version, clients.client_version)
         """, (client_uuid, now, now, client_os, client_version))
     logger.info(f"Tracked client: {client_uuid}")

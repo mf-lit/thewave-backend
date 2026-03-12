@@ -3,7 +3,7 @@ import time
 import logging
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import requests
@@ -180,6 +180,32 @@ def _format_response_with_expires(data: dict, expires: float) -> dict:
     return {"data": data, "expires": int(expires)}
 
 
+def _fetch_current_days(date_from, number_of_days_str, number_of_days, refresh):
+    """Fetch current/future days from upstream API with caching."""
+    cache_key = _get_cache_key(date_from, number_of_days_str)
+
+    if not refresh:
+        cached_result = _get_from_cache(cache_key)
+        if cached_result is not None:
+            cached_data, expires = cached_result
+            cached_data = add_temperature_to_performances(cached_data)
+            cached_data = add_floodlights_to_performances(cached_data)
+            return jsonify(_format_response_with_expires(cached_data, expires))
+
+    try:
+        response_data = get_calendar(date_from, number_of_days_str)
+        response_data = normalize_calendar_response(response_data, date_from, number_of_days)
+        response_data = add_side_to_availability(response_data)
+        _store_in_cache(cache_key, response_data)
+        response_data = add_temperature_to_performances(response_data)
+        response_data = add_floodlights_to_performances(response_data)
+        expires = time.time() + CACHE_TTL_SECONDS
+        return jsonify(_format_response_with_expires(response_data, expires))
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Upstream API call failed: dateFrom={date_from}, numberOfDays={number_of_days}, error={str(e)}")
+        return jsonify({"error": f"Upstream API error: {str(e)}"}), 500
+
+
 @app.route("/calendar", methods=["GET"])
 def calendar_endpoint():
     """
@@ -221,52 +247,59 @@ def calendar_endpoint():
             logger.error(f"Failed to load test data: {str(e)}")
             return jsonify({"error": f"Test mode error: {str(e)}"}), 500
     
-    # Check if requesting past dates (history feature - only in production mode)
+    # Determine which days are past vs present/future
     try:
         requested_date = datetime.strptime(date_from, "%Y-%m-%d").date()
         today = datetime.now().date()
-
-        if requested_date < today:
-            logger.info(f"Requesting historical data for dateFrom={date_from}, numberOfDays={number_of_days}")
-            # Historical data is pre-processed with side field and temperatures already added during archiving
-            response_data = build_multi_day_response(date_from, number_of_days)
-            # No need to add temperatures - they're already in the archived files
-            expires = time.time() + 3600
-            return jsonify(_format_response_with_expires(response_data, expires))
     except ValueError as e:
         logger.error(f"Invalid date format: {date_from}, error: {str(e)}")
         return jsonify({"error": f"Invalid date format: {date_from}"}), 400
-    
-    # For current/future dates: use upstream API with caching
-    cache_key = _get_cache_key(date_from, number_of_days_str)
 
-    # Check cache unless refresh is requested
-    if not refresh:
-        cached_result = _get_from_cache(cache_key)
-        if cached_result is not None:
-            cached_data, expires = cached_result
-            # Cached data already has side field added
-            # Add water temperature to performances (not cached, as it's time-dependent)
-            cached_data = add_temperature_to_performances(cached_data)
-            cached_data = add_floodlights_to_performances(cached_data)
-            return jsonify(_format_response_with_expires(cached_data, expires))
+    end_date = requested_date + timedelta(days=number_of_days - 1)
 
-    # Fetch from upstream API
-    try:
-        response_data = get_calendar(date_from, number_of_days_str)
-        # Normalize response to ensure proper structure (handles "No schedule data available" cases)
-        response_data = normalize_calendar_response(response_data, date_from, number_of_days)
-        # Add side field before caching
-        response_data = add_side_to_availability(response_data)
-        _store_in_cache(cache_key, response_data)
-        # Add water temperature to performances (after caching, as it's time-dependent)
-        response_data = add_temperature_to_performances(response_data)
-        response_data = add_floodlights_to_performances(response_data)
-        expires = time.time() + CACHE_TTL_SECONDS
+    # All days are in the past — serve entirely from history
+    if end_date < today:
+        logger.info(f"Requesting historical data for dateFrom={date_from}, numberOfDays={number_of_days}")
+        response_data = build_multi_day_response(date_from, number_of_days)
+        expires = time.time() + 3600
         return jsonify(_format_response_with_expires(response_data, expires))
+
+    # All days are present/future — serve entirely from upstream
+    if requested_date >= today:
+        return _fetch_current_days(date_from, number_of_days_str, number_of_days, refresh)
+
+    # Mixed range: some past days + some present/future days
+    past_days_count = (today - requested_date).days
+    future_days_count = number_of_days - past_days_count
+    future_date_from = today.strftime("%Y-%m-%d")
+
+    logger.info(
+        f"Mixed date range: {past_days_count} past day(s) from {date_from}, "
+        f"{future_days_count} current/future day(s) from {future_date_from}"
+    )
+
+    # Fetch past days from history
+    history_data = build_multi_day_response(date_from, past_days_count)
+    history_days = history_data.get("days", [])
+
+    # Fetch current/future days from upstream
+    try:
+        upstream_data = get_calendar(future_date_from, str(future_days_count))
+        upstream_data = normalize_calendar_response(upstream_data, future_date_from, future_days_count)
+        upstream_data = add_side_to_availability(upstream_data)
+        upstream_data = add_temperature_to_performances(upstream_data)
+        upstream_data = add_floodlights_to_performances(upstream_data)
+        upstream_days = upstream_data.get("days", [])
     except requests.exceptions.RequestException as e:
-        logger.error(f"Upstream API call failed: dateFrom={date_from}, numberOfDays={number_of_days}, error={str(e)}")
-        return jsonify({"error": f"Upstream API error: {str(e)}"}), 500
+        logger.error(f"Upstream API call failed for future portion: {str(e)}")
+        upstream_days = []
+
+    # Combine
+    combined = {"days": history_days + upstream_days}
+    if "_warnings" in history_data:
+        combined["_warnings"] = history_data["_warnings"]
+    expires = time.time() + CACHE_TTL_SECONDS
+    return jsonify(_format_response_with_expires(combined, expires))
 
 
 @app.route("/water-temperature", methods=["GET"])
