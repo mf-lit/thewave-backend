@@ -100,8 +100,19 @@ def get_wave_weather() -> tuple[float, float, str]:
     }
     
     logger.info("Scraping weather data from website")
-    response = requests.get(url, headers=headers)
-    response.raise_for_status()
+    max_retries = 2
+    for attempt in range(max_retries + 1):
+        try:
+            response = requests.get(url, headers=headers, timeout=15)
+            response.raise_for_status()
+            break
+        except (requests.exceptions.ProxyError, requests.exceptions.ConnectionError) as e:
+            if attempt < max_retries:
+                log = logger.debug if attempt == 0 else logger.warning
+                log(f"Weather scrape connection error (attempt {attempt + 1}/{max_retries + 1}), retrying in 3s: {e}")
+                time.sleep(3)
+            else:
+                raise
     
     soup = bs.BeautifulSoup(response.content, "html5lib")
     marker = soup.find("p", string=re.compile("Water:.*"))

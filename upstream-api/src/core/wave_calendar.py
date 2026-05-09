@@ -2,8 +2,10 @@ import json
 import logging
 import copy
 import os
+import time
 from pathlib import Path
 from datetime import datetime, timedelta
+import requests
 import yaml
 
 logger = logging.getLogger(__name__)
@@ -81,6 +83,7 @@ def get_calendar(date_from: str, number_of_days: str) -> dict:
         dict: JSON response from the API as a dictionary
     """
     from src.core.upstream_auth import get_authenticated_session, reset_session
+    from src.core.proxy_health import wait_for_healthy_proxy
 
     url = UPSTREAM_API_URL
     params = {
@@ -91,20 +94,35 @@ def get_calendar(date_from: str, number_of_days: str) -> dict:
 
     logger.info(f"Calling upstream API: dateFrom={date_from}, numberOfDays={number_of_days}")
 
-    session = get_authenticated_session()
-    response = session.get(url, params=params)
+    # Wait if the VPN proxy is known-unhealthy (rotation or degraded server)
+    wait_for_healthy_proxy(timeout=30)
 
-    # Re-authenticate once on 401/403 (token may have expired)
-    if response.status_code in (401, 403):
-        logger.warning(f"Upstream API returned {response.status_code}, re-authenticating")
-        reset_session()
-        session = get_authenticated_session()
-        response = session.get(url, params=params)
+    max_retries = 2
+    for attempt in range(max_retries + 1):
+        try:
+            session = get_authenticated_session()
+            response = session.get(url, params=params)
 
-    logger.info(f"Upstream API response: status_code={response.status_code}, dateFrom={date_from}, numberOfDays={number_of_days}")
-    response.raise_for_status()
+            # Re-authenticate once on 401/403 (token may have expired)
+            if response.status_code in (401, 403):
+                logger.warning(f"Upstream API returned {response.status_code}, re-authenticating")
+                reset_session()
+                session = get_authenticated_session()
+                response = session.get(url, params=params)
 
-    return response.json()
+            logger.info(f"Upstream API response: status_code={response.status_code}, dateFrom={date_from}, numberOfDays={number_of_days}")
+            response.raise_for_status()
+            return response.json()
+
+        except (requests.exceptions.ProxyError, requests.exceptions.ConnectionError) as e:
+            if attempt < max_retries:
+                log = logger.debug if attempt == 0 else logger.warning
+                log(f"Proxy/connection error (attempt {attempt + 1}/{max_retries + 1}), retrying in 3s: {e}")
+                # Reset session to discard stale connection pool to Privoxy
+                reset_session()
+                time.sleep(3)
+            else:
+                raise
 
 
 def load_test_data() -> dict:
