@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+from datetime import datetime
 from typing import Dict, Optional
 
 import firebase_admin
@@ -13,6 +14,52 @@ logger = logging.getLogger(__name__)
 
 storage = SQLiteStorage()
 _firebase_app: Optional[firebase_admin.App] = None
+
+
+_MONTH_ABBREV = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+]
+
+
+def _day_with_ordinal(day: int) -> str:
+    if 11 <= day <= 13:
+        return f"{day}th"
+    return {1: f"{day}st", 2: f"{day}nd", 3: f"{day}rd"}.get(day % 10, f"{day}th")
+
+
+def _format_date_short(date_str: str) -> str:
+    """Format YYYY-MM-DD as e.g. '5th Jan'. Falls back to the raw string on parse error."""
+    try:
+        d = datetime.strptime(date_str, "%Y-%m-%d")
+        return f"{_day_with_ordinal(d.day)} {_MONTH_ABBREV[d.month - 1]}"
+    except (ValueError, IndexError):
+        return date_str
+
+
+def _build_display_strings(
+    notification: Dict, availability: int
+) -> tuple[str, str]:
+    """Build the (title, body) shown by iOS when the app is in background/killed.
+
+    Matches the formatting in the Flutter app's NotificationFormatter so that
+    iOS auto-displayed banners look the same as the in-app local notifications
+    shown when the app is in foreground.
+    """
+    session_title = notification.get("title", "Session")
+    date = notification.get("date", "")
+    time = notification.get("time", "")
+    side = notification.get("side", "")
+    notification_type = notification.get("notification_type", "below_threshold")
+
+    title = f"{session_title}: {_format_date_short(date)} at {time}"
+
+    if notification_type == "above_zero":
+        body = "A session has become available"
+    else:
+        body = f"Availability dropped to {availability} on the {side}"
+
+    return title, body
 
 
 def _get_credentials_path() -> str:
@@ -94,12 +141,27 @@ def send_notification(
         return
 
     data_payload = _build_data_payload(notification, availability, threshold)
-    logger.info(f"Sending FCM data-only message to client {client_id} with payload: {json.dumps(data_payload, indent=2)}")
+    title, body = _build_display_strings(notification, availability)
+    logger.info(
+        f"Sending FCM message to client {client_id}. "
+        f"Title: {title!r}, Body: {body!r}, Data: {json.dumps(data_payload)}"
+    )
 
     fcm_message = messaging.Message(
+        notification=messaging.Notification(title=title, body=body),
         data=data_payload,
         token=fcm_token,
         android=messaging.AndroidConfig(priority='high'),
+        apns=messaging.APNSConfig(
+            headers={'apns-priority': '10', 'apns-push-type': 'alert'},
+            payload=messaging.APNSPayload(
+                aps=messaging.Aps(
+                    alert=messaging.ApsAlert(title=title, body=body),
+                    sound='default',
+                    mutable_content=True,
+                ),
+            ),
+        ),
     )
 
     try:
