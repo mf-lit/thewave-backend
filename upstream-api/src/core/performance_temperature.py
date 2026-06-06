@@ -13,15 +13,13 @@ FORECAST_CSV_PATH = os.path.join(
     "data/latest.csv"
 )
 
-# Forecast cache: stores loaded data and metadata
+# Forecast cache: stores loaded data and the source file's mtime at load time.
+# Reload is triggered when the on-disk mtime changes, so the cache tracks
+# whatever cadence the producer rewrites latest.csv at.
 _forecast_cache: dict = {
     "data": {},           # dict[datetime, float] - the forecast data
-    "loaded_at": None,    # datetime when data was loaded
-    "loaded_date": None,  # date for which the data was loaded (to detect day change)
+    "loaded_mtime": None, # float - st_mtime of latest.csv at load time
 }
-
-# Hour at which to reload forecast data daily (24-hour format)
-FORECAST_RELOAD_HOUR = int(os.getenv("FORECAST_RELOAD_HOUR", "1"))
 
 # LRU cache size for historical temperature lookups
 HISTORICAL_TEMP_CACHE_SIZE = int(os.getenv("HISTORICAL_TEMP_CACHE_SIZE", "256"))
@@ -134,47 +132,25 @@ def _get_temperature_for_time(target_time: datetime) -> float | None:
     return _get_temperature_for_time_cached(target_time.isoformat())
 
 
-def _should_reload_forecast(now: datetime) -> bool:
+def _current_forecast_mtime() -> float | None:
+    """Return st_mtime of the forecast CSV, or None if it's missing/unreadable."""
+    try:
+        return os.path.getmtime(FORECAST_CSV_PATH)
+    except OSError:
+        return None
+
+
+def _should_reload_forecast() -> bool:
     """
-    Determine if forecast data should be reloaded.
-
-    Reload conditions:
-    1. No data loaded yet (first request)
-    2. Day has changed AND we're past the reload hour
-    3. Data was loaded on a previous day and we missed the reload time
-
-    Args:
-        now: Current datetime
-
-    Returns:
-        bool: True if forecast should be reloaded
+    Reload when the on-disk forecast file's mtime differs from what we
+    loaded last. First call (loaded_mtime is None) always reloads if the
+    file exists.
     """
-    loaded_at = _forecast_cache["loaded_at"]
-    loaded_date = _forecast_cache["loaded_date"]
-
-    # Never loaded - need to load
-    if loaded_at is None or loaded_date is None:
-        return True
-
-    today = now.date()
-    current_hour = now.hour
-
-    # Same day - no reload needed
-    if loaded_date == today:
+    disk_mtime = _current_forecast_mtime()
+    if disk_mtime is None:
+        # File missing — nothing to load; keep whatever's cached.
         return False
-
-    # Different day - check if we should reload
-    # Reload if: we're past the reload hour today, OR
-    # the data is from more than 1 day ago (missed reload)
-    if current_hour >= FORECAST_RELOAD_HOUR:
-        return True
-
-    # Before reload hour but data is stale (more than 1 day old)
-    days_old = (today - loaded_date).days
-    if days_old > 1:
-        return True
-
-    return False
+    return disk_mtime != _forecast_cache["loaded_mtime"]
 
 
 def _load_forecast_data_from_file() -> dict[datetime, float]:
@@ -214,21 +190,20 @@ def _load_forecast_data_from_file() -> dict[datetime, float]:
 
 def _load_forecast_data() -> dict[datetime, float]:
     """
-    Get forecast data, loading from file if needed.
-
-    Data is cached and reloaded once per day at FORECAST_RELOAD_HOUR (default 01:00).
-    If the reload time is missed (e.g., server was down), data will be loaded on next request.
+    Get forecast data, reloading from disk whenever latest.csv's mtime changes.
 
     Returns:
         dict[datetime, float]: Dictionary mapping datetime (hour) to predicted water temperature
     """
-    now = datetime.now()
-
-    if _should_reload_forecast(now):
-        logger.info(f"Reloading forecast data (reload hour: {FORECAST_RELOAD_HOUR:02d}:00)")
+    if _should_reload_forecast():
+        # Capture mtime before reading; if producer atomically renames the
+        # file (the common case), this stamp matches the data we're about
+        # to read. If the file is rewritten in place mid-read, the next
+        # mtime will differ and we'll reload on the next call.
+        new_mtime = _current_forecast_mtime()
+        logger.info("Reloading forecast data (latest.csv mtime changed)")
         _forecast_cache["data"] = _load_forecast_data_from_file()
-        _forecast_cache["loaded_at"] = now
-        _forecast_cache["loaded_date"] = now.date()
+        _forecast_cache["loaded_mtime"] = new_mtime
 
     return _forecast_cache["data"]
 

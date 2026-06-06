@@ -39,8 +39,10 @@ logger = logging.getLogger(__name__)
 # Test mode configuration (enabled when TEST_MODE env var is set)
 TEST_MODE = os.getenv("TEST_MODE", "").lower() in ("true", "1", "yes")
 
-# In-memory cache for calendar data: {cache_key: {"data": dict, "timestamp": float, "expires": float}}
-_cache: dict[str, dict] = {}
+# In-memory cache keyed by individual day: {"YYYY-MM-DD": {"day": dict, "timestamp": float, "expires": float}}
+# Caching by day (not by request window) lets any cached date serve any window that includes it,
+# so overlapping requests never re-fetch the same day from upstream.
+_day_cache: dict[str, dict] = {}
 
 # Cache TTL in seconds (default: 600, configurable via CACHE_TTL_SECONDS env var)
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "600"))
@@ -96,72 +98,115 @@ def track_client_id():
 
 
 
-def _get_cache_key(date_from: str, number_of_days: str) -> str:
+def _get_cached_day(date: str) -> tuple[dict, float] | None:
+    """Return (day_data, expires) if the date is cached and unexpired, else None.
+
+    Evicts the entry on TTL expiry as a side effect.
     """
-    Generate a cache key from date_from and number_of_days.
-    
-    Args:
-        date_from: Start date in YYYY-MM-DD format
-        number_of_days: Number of days to fetch (as string)
-    
-    Returns:
-        str: Cache key
-    """
-    return f"{date_from}:{number_of_days}"
+    entry = _day_cache.get(date)
+    if entry is None:
+        return None
+    if time.time() - entry["timestamp"] >= CACHE_TTL_SECONDS:
+        del _day_cache[date]
+        return None
+    return (entry["day"], entry["expires"])
 
 
-def _is_cache_valid(cache_entry: dict, ttl: int) -> bool:
-    """
-    Check if a cache entry is still valid based on TTL.
-    
-    Args:
-        cache_entry: Cache entry with "data" and "timestamp" keys
-        ttl: Time to live in seconds
-    
-    Returns:
-        bool: True if cache entry is still valid, False otherwise
-    """
-    if not cache_entry:
-        return False
-    current_time = time.time()
-    age = current_time - cache_entry["timestamp"]
-    return age < ttl
-
-
-def _get_from_cache(key: str) -> tuple[dict, float] | None:
-    """
-    Retrieve data from cache if it exists and is still valid.
-    
-    Args:
-        key: Cache key
-    
-    Returns:
-        tuple[dict, float] | None: (Cached data, expiration time) if valid, None otherwise
-    """
-    cache_entry = _cache.get(key)
-    if cache_entry and _is_cache_valid(cache_entry, CACHE_TTL_SECONDS):
-        return (cache_entry["data"], cache_entry["expires"])
-    # Remove expired entry
-    if key in _cache:
-        del _cache[key]
-    return None
-
-
-def _store_in_cache(key: str, data: dict) -> None:
-    """
-    Store data in cache with current timestamp and expiration time.
-
-    Args:
-        key: Cache key
-        data: Data to store
-    """
+def _store_days_in_cache(days: list) -> None:
+    """Store each day from a fresh upstream response under its `date` field."""
     timestamp = time.time()
     expires = timestamp + CACHE_TTL_SECONDS
-    _cache[key] = {
-        "data": data,
-        "timestamp": timestamp,
-        "expires": expires
+    for day in days:
+        if not isinstance(day, dict):
+            continue
+        date = day.get("date")
+        if not date:
+            continue
+        _day_cache[date] = {"day": day, "timestamp": timestamp, "expires": expires}
+
+
+def _split_into_runs(dates: list) -> list[tuple]:
+    """Group ascending dates into contiguous (start_date, length) runs."""
+    if not dates:
+        return []
+    runs = []
+    run_start = dates[0]
+    run_len = 1
+    prev = dates[0]
+    for d in dates[1:]:
+        if (d - prev).days == 1:
+            run_len += 1
+        else:
+            runs.append((run_start, run_len))
+            run_start = d
+            run_len = 1
+        prev = d
+    runs.append((run_start, run_len))
+    return runs
+
+
+def _empty_day(date_str: str) -> dict:
+    return {
+        "availability": None,
+        "date": date_str,
+        "hasNoTimeSlot": None,
+        "performances": [],
+        "priceMax": None,
+        "priceMin": None,
     }
+
+
+def _get_current_days(date_from: str, number_of_days: int, refresh: bool) -> tuple[list, float]:
+    """Return (days, min_expires) for a contiguous current/future window.
+
+    Looks up each requested date in the per-day cache and only fetches contiguous runs
+    of missing dates from upstream. Each fetched day is stored individually so future
+    overlapping requests reuse it. Raises requests.RequestException on upstream failure.
+    """
+    base_date = datetime.strptime(date_from, "%Y-%m-%d").date()
+    requested_dates = [base_date + timedelta(days=i) for i in range(number_of_days)]
+
+    if refresh:
+        missing_dates = list(requested_dates)
+        logger.info(
+            f"Force-refresh requested for dateFrom={date_from}, numberOfDays={number_of_days}, fetching from upstream"
+        )
+    else:
+        missing_dates = [
+            d for d in requested_dates
+            if _get_cached_day(d.strftime("%Y-%m-%d")) is None
+        ]
+        if missing_dates:
+            missing_strs = [d.strftime("%Y-%m-%d") for d in missing_dates]
+            logger.info(
+                f"Cache miss for {missing_strs} (request: dateFrom={date_from}, numberOfDays={number_of_days}), fetching from upstream"
+            )
+
+    for run_start, run_len in _split_into_runs(missing_dates):
+        run_start_str = run_start.strftime("%Y-%m-%d")
+        run_len_str = str(run_len)
+        response_data = get_calendar(run_start_str, run_len_str)
+        response_data = normalize_calendar_response(response_data, run_start_str, run_len)
+        response_data = add_side_to_availability(response_data)
+        _store_days_in_cache(response_data.get("days", []))
+
+    assembled_days = []
+    min_expires = float("inf")
+    for d in requested_dates:
+        d_str = d.strftime("%Y-%m-%d")
+        result = _get_cached_day(d_str)
+        if result is None:
+            assembled_days.append(_empty_day(d_str))
+        else:
+            day_data, expires = result
+            assembled_days.append(day_data)
+            if expires < min_expires:
+                min_expires = expires
+
+    if min_expires == float("inf"):
+        min_expires = time.time() + CACHE_TTL_SECONDS
+
+    return assembled_days, min_expires
 
 
 def _format_response_with_expires(data: dict, expires: float) -> dict:
@@ -181,29 +226,17 @@ def _format_response_with_expires(data: dict, expires: float) -> dict:
 
 
 def _fetch_current_days(date_from, number_of_days_str, number_of_days, refresh):
-    """Fetch current/future days from upstream API with caching."""
-    cache_key = _get_cache_key(date_from, number_of_days_str)
-
-    if not refresh:
-        cached_result = _get_from_cache(cache_key)
-        if cached_result is not None:
-            cached_data, expires = cached_result
-            cached_data = add_temperature_to_performances(cached_data)
-            cached_data = add_floodlights_to_performances(cached_data)
-            return jsonify(_format_response_with_expires(cached_data, expires))
-
+    """Serve a current/future window using per-day cache + run-batched upstream fetches."""
     try:
-        response_data = get_calendar(date_from, number_of_days_str)
-        response_data = normalize_calendar_response(response_data, date_from, number_of_days)
-        response_data = add_side_to_availability(response_data)
-        _store_in_cache(cache_key, response_data)
-        response_data = add_temperature_to_performances(response_data)
-        response_data = add_floodlights_to_performances(response_data)
-        expires = time.time() + CACHE_TTL_SECONDS
-        return jsonify(_format_response_with_expires(response_data, expires))
+        days, expires = _get_current_days(date_from, number_of_days, refresh)
     except requests.exceptions.RequestException as e:
         logger.error(f"Upstream API call failed: dateFrom={date_from}, numberOfDays={number_of_days}, error={str(e)}")
         return jsonify({"error": f"Upstream API error: {str(e)}"}), 500
+
+    response_data = {"days": days}
+    response_data = add_temperature_to_performances(response_data)
+    response_data = add_floodlights_to_performances(response_data)
+    return jsonify(_format_response_with_expires(response_data, expires))
 
 
 @app.route("/calendar", methods=["GET"])
@@ -282,14 +315,14 @@ def calendar_endpoint():
     history_data = build_multi_day_response(date_from, past_days_count)
     history_days = history_data.get("days", [])
 
-    # Fetch current/future days from upstream
+    # Fetch current/future days via the per-day cache (refresh=False; refresh isn't supported
+    # for mixed-range requests since the past portion comes from immutable history files)
+    future_expires = time.time() + CACHE_TTL_SECONDS
     try:
-        upstream_data = get_calendar(future_date_from, str(future_days_count))
-        upstream_data = normalize_calendar_response(upstream_data, future_date_from, future_days_count)
-        upstream_data = add_side_to_availability(upstream_data)
-        upstream_data = add_temperature_to_performances(upstream_data)
-        upstream_data = add_floodlights_to_performances(upstream_data)
-        upstream_days = upstream_data.get("days", [])
+        upstream_days, future_expires = _get_current_days(future_date_from, future_days_count, refresh=False)
+        upstream_payload = add_temperature_to_performances({"days": upstream_days})
+        upstream_payload = add_floodlights_to_performances(upstream_payload)
+        upstream_days = upstream_payload.get("days", [])
     except requests.exceptions.RequestException as e:
         logger.error(f"Upstream API call failed for future portion: {str(e)}")
         upstream_days = []
@@ -298,8 +331,7 @@ def calendar_endpoint():
     combined = {"days": history_days + upstream_days}
     if "_warnings" in history_data:
         combined["_warnings"] = history_data["_warnings"]
-    expires = time.time() + CACHE_TTL_SECONDS
-    return jsonify(_format_response_with_expires(combined, expires))
+    return jsonify(_format_response_with_expires(combined, future_expires))
 
 
 @app.route("/water-temperature", methods=["GET"])

@@ -138,6 +138,47 @@ def archive_today_response():
         logger.error(f"Failed to archive daily response: {str(e)}", exc_info=True)
 
 
+PREWARM_DAYS = "3"
+
+
+def prewarm_upcoming_days():
+    """
+    Pre-warm the in-memory calendar cache with the next PREWARM_DAYS of upstream data.
+    Runs on an interval so clients hitting /calendar?dateFrom=today never wait on a cold
+    upstream fetch. Also calls the enrichment functions to keep their side caches
+    (sun-times, forecast CSV, historical-temperature LRU) warm.
+    """
+    from src.core.wave_calendar import get_calendar, add_side_to_availability
+    from src.core.history import normalize_calendar_response
+    from src.core.performance_temperature import add_temperature_to_performances
+    from src.core.performance_floodlights import add_floodlights_to_performances
+    import main
+
+    test_mode = os.getenv("TEST_MODE", "").lower() in ("true", "1", "yes")
+    if test_mode:
+        logger.info("Skipping cache pre-warm - test mode is enabled")
+        return
+
+    try:
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        logger.info(f"Pre-warming calendar cache for next {PREWARM_DAYS} days from {today_str}")
+
+        response_data = get_calendar(today_str, PREWARM_DAYS)
+        response_data = normalize_calendar_response(response_data, today_str, int(PREWARM_DAYS))
+        response_data = add_side_to_availability(response_data)
+        main._store_days_in_cache(response_data.get("days", []))
+
+        # Warm enrichment side caches; output is discarded because enrichment is
+        # time-dependent and must be re-applied per request.
+        add_temperature_to_performances(response_data)
+        add_floodlights_to_performances(response_data)
+
+        logger.info(f"Successfully pre-warmed cache for {today_str} ({PREWARM_DAYS} days)")
+
+    except Exception as e:
+        logger.error(f"Failed to pre-warm calendar cache: {str(e)}", exc_info=True)
+
+
 def setup_daily_archive_task(app: Flask):
     """
     Initialize APScheduler and schedule daily archive task at 23:59 and hourly water temperature recording.
@@ -148,6 +189,7 @@ def setup_daily_archive_task(app: Flask):
     # Lazy import APScheduler to avoid circular import issues
     from apscheduler.schedulers.background import BackgroundScheduler
     from apscheduler.triggers.cron import CronTrigger
+    from apscheduler.triggers.interval import IntervalTrigger
     from src.core.water_temp_db import init_database
     import atexit
 
@@ -180,10 +222,29 @@ def setup_daily_archive_task(app: Flask):
         replace_existing=True
     )
 
+    prewarm_enabled = os.getenv("PREWARM_ENABLED", "true").lower() not in ("false", "0", "no")
+    prewarm_interval = int(os.getenv("PREWARM_INTERVAL_MINUTES", "9"))
+
+    if prewarm_enabled:
+        _scheduler.add_job(
+            func=prewarm_upcoming_days,
+            trigger=IntervalTrigger(minutes=prewarm_interval),
+            id="prewarm_upcoming_days",
+            name=f"Pre-warm calendar cache for next {PREWARM_DAYS} days",
+            next_run_time=datetime.now(),
+            max_instances=1,
+            coalesce=True,
+            replace_existing=True,
+        )
+
     _scheduler.start()
     logger.info("Scheduler started:")
     logger.info("  - Daily archive runs at 23:59 each day")
     logger.info("  - Water temperature recording runs at the top of each hour")
+    if prewarm_enabled:
+        logger.info(f"  - Calendar cache pre-warm runs every {prewarm_interval} min (immediately on startup)")
+    else:
+        logger.info("  - Calendar cache pre-warm disabled (PREWARM_ENABLED=false)")
 
     # Ensure scheduler shuts down when app exits
     atexit.register(lambda: _scheduler.shutdown() if _scheduler else None)

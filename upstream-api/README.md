@@ -118,7 +118,6 @@ The configured directory is logged at application startup.
 - `UPSTREAM_API_URL`: Override upstream API URL (alternative to config.yaml)
 - `HISTORY_DIR`: Override history directory path (alternative to config.yaml)
 - `CACHE_TTL_SECONDS`: Cache TTL in seconds (default: 600)
-- `FORECAST_RELOAD_HOUR`: Hour to reload forecast data daily, 0-23 (default: 1 = 01:00)
 - `HISTORICAL_TEMP_CACHE_SIZE`: LRU cache size for historical temperature lookups (default: 256)
 - `DB_TIMEOUT`: SQLite database lock timeout in seconds (default: 30.0)
 - `PORT`: Server port (default: 5000)

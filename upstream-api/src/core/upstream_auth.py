@@ -177,3 +177,15 @@ def reset_session() -> None:
     global _session, _session_flag
     _session = None
     _session_flag = None
+
+
+def close_session_connections() -> None:
+    """Close the cached session's underlying connection pool but keep the auth state.
+
+    Use this when a proxy/connection-layer error makes existing connections to
+    Privoxy unusable. Cookies and CSRF headers remain valid, so the next request
+    re-establishes connections without paying for a full re-auth.
+    """
+    global _session
+    if _session is not None:
+        _session.close()

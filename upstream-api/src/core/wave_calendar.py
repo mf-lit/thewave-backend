@@ -82,7 +82,7 @@ def get_calendar(date_from: str, number_of_days: str) -> dict:
     Returns:
         dict: JSON response from the API as a dictionary
     """
-    from src.core.upstream_auth import get_authenticated_session, reset_session
+    from src.core.upstream_auth import get_authenticated_session, reset_session, close_session_connections
     from src.core.proxy_health import wait_for_healthy_proxy
 
     url = UPSTREAM_API_URL
@@ -118,8 +118,9 @@ def get_calendar(date_from: str, number_of_days: str) -> dict:
             if attempt < max_retries:
                 log = logger.debug if attempt == 0 else logger.warning
                 log(f"Proxy/connection error (attempt {attempt + 1}/{max_retries + 1}), retrying in 3s: {e}")
-                # Reset session to discard stale connection pool to Privoxy
-                reset_session()
+                # Discard the stale connection pool but keep auth state.
+                # A 401/403 on retry would still trigger a full re-auth above.
+                close_session_connections()
                 time.sleep(3)
             else:
                 raise
