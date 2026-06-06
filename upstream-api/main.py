@@ -21,6 +21,7 @@ import src.core.wave_calendar as wave_calendar
 from src.core.history import build_multi_day_response, normalize_calendar_response
 from src.core.performance_temperature import add_temperature_to_performances
 from src.core.performance_floodlights import add_floodlights_to_performances
+from src.core.performance_price import add_prices_to_performances
 from src.core.auth import load_api_keys, require_api_key
 from src.core.client_tracker import init_client_tracking, track_client
 from src.core.weather import (
@@ -236,6 +237,7 @@ def _fetch_current_days(date_from, number_of_days_str, number_of_days, refresh):
     response_data = {"days": days}
     response_data = add_temperature_to_performances(response_data)
     response_data = add_floodlights_to_performances(response_data)
+    response_data = add_prices_to_performances(response_data)
     return jsonify(_format_response_with_expires(response_data, expires))
 
 
@@ -274,6 +276,7 @@ def calendar_endpoint():
             # Add water temperature to performances based on timing
             response_data = add_temperature_to_performances(response_data)
             response_data = add_floodlights_to_performances(response_data)
+            response_data = add_prices_to_performances(response_data)
             expires = time.time() + 3600
             return jsonify(_format_response_with_expires(response_data, expires))
         except (FileNotFoundError, json.JSONDecodeError) as e:
@@ -322,6 +325,7 @@ def calendar_endpoint():
         upstream_days, future_expires = _get_current_days(future_date_from, future_days_count, refresh=False)
         upstream_payload = add_temperature_to_performances({"days": upstream_days})
         upstream_payload = add_floodlights_to_performances(upstream_payload)
+        upstream_payload = add_prices_to_performances(upstream_payload)
         upstream_days = upstream_payload.get("days", [])
     except requests.exceptions.RequestException as e:
         logger.error(f"Upstream API call failed for future portion: {str(e)}")
