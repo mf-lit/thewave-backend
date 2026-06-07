@@ -188,6 +188,18 @@ class WaveScraper:
         if self._csrf_token is None:
             self._bootstrap(f"{FRONTEND}/")
 
+    def _refresh_session(self) -> None:
+        """Re-bootstrap an expired session.
+
+        The Wave's session (CSRF token + cookies) expires after roughly an hour,
+        after which every API call returns HTTP 401. Long collection passes
+        outlive a single session, so we drop the stale creds and re-bootstrap
+        from a fresh page load to get a new token and cookies.
+        """
+        self._csrf_token = None
+        self._api_base = None
+        self._ensure_session_anon()
+
     def _headers(self) -> dict[str, str]:
         return {
             "x-api-key": API_KEY,
@@ -197,19 +209,34 @@ class WaveScraper:
             "referer": f"{FRONTEND}/",
         }
 
+    def _request_json(self, method: str, path: str, data: dict | None = None) -> dict:
+        """Issue an API request, re-bootstrapping once if the session expired.
+
+        A 401 means the session lapsed mid-run; we refresh it and retry a single
+        time. Any other non-OK status, or a 401 that survives the refresh, raises.
+        """
+        verb = method.upper()
+        for attempt in range(2):
+            if method == "get":
+                resp = self._page.request.get(
+                    f"{self._api_base}{path}", headers=self._headers()
+                )
+            else:
+                resp = self._page.request.post(
+                    f"{self._api_base}{path}", headers=self._headers(), data=data
+                )
+            if resp.status == 401 and attempt == 0:
+                self._refresh_session()
+                continue
+            if not resp.ok:
+                raise RuntimeError(f"{verb} {path} failed: HTTP {resp.status}")
+            return resp.json()
+
     def _get_json(self, path: str) -> dict:
-        resp = self._page.request.get(f"{self._api_base}{path}", headers=self._headers())
-        if not resp.ok:
-            raise RuntimeError(f"GET {path} failed: HTTP {resp.status}")
-        return resp.json()
+        return self._request_json("get", path)
 
     def _post_json(self, path: str, data: dict) -> dict:
-        resp = self._page.request.post(
-            f"{self._api_base}{path}", headers=self._headers(), data=data
-        )
-        if not resp.ok:
-            raise RuntimeError(f"POST {path} failed: HTTP {resp.status}")
-        return resp.json()
+        return self._request_json("post", path, data)
 
     # -- public API ------------------------------------------------------
 
