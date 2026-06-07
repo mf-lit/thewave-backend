@@ -70,6 +70,8 @@ def _cmd_collect(args) -> int:
         proxy=args.proxy,
         locale=args.locale,
         categories=tuple(c.strip() for c in args.categories.split(",") if c.strip()),
+        overwrite=args.overwrite,
+        max_delay_seconds=parse_duration(args.max_delay) if args.max_delay else None,
         on_progress=on_progress,
     )
     print(summary, file=sys.stderr)
@@ -107,6 +109,18 @@ def main(argv: list[str] | None = None) -> int:
         "--categories",
         default=",".join(DEFAULT_EVENT_CATEGORIES),
         help=f"comma-separated event category codes (default: {','.join(DEFAULT_EVENT_CATEGORIES)})",
+    )
+    coll.add_argument(
+        "--max-delay",
+        default=None,
+        help="cap the inter-performance delay: 1h, 30m, 90s, or seconds "
+        "(default: none; delay is target-time / number-of-performances)",
+    )
+    coll.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="re-scrape every performance, including those already in the db "
+        "(default: skip performances already recorded)",
     )
     coll.set_defaults(func=_cmd_collect)
 

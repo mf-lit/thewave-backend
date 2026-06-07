@@ -60,6 +60,11 @@ class PriceStore:
     def close(self) -> None:
         self.conn.close()
 
+    def existing_aks(self) -> set[str]:
+        """Return the set of performanceAKs already recorded in the DB."""
+        rows = self.conn.execute("SELECT performanceAK FROM performances").fetchall()
+        return {row["performanceAK"] for row in rows}
+
     def record(
         self,
         performance_ak: str,

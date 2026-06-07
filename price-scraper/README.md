@@ -52,12 +52,19 @@ uv run python -m price_scraper collect --days 19 --target-time 30m --proxy http:
   windows internally (e.g. 19 → 7 + 7 + 5).
 - `--target-time` — `1h`, `30m`, `90s`, `1h30m`, or bare seconds (default `1h`).
   The inter-performance delay is `target-time / number-of-performances`.
+- `--max-delay` — cap the inter-performance delay (`1h`, `30m`, `90s`, or
+  seconds; default none). When set, the pass finishes sooner than
+  `--target-time` for small batches instead of stretching the delay out.
 - `--db PATH` (default `prices.db`), `--proxy URL` (default direct),
   `--categories` (default `TWBB2C,ALL2`).
+- `--overwrite` — re-scrape every performance, including those already in the
+  DB. By default, performances already recorded in the DB are skipped (only new
+  performances are scraped).
 
-Run it repeatedly (e.g. a daily cron) against the same DB — it updates
-`date_last_scraped` every run and appends to a per-performance price `history`
-only when the min/max price changes.
+Run it repeatedly (e.g. a daily cron) against the same DB. By default it only
+scrapes performances not yet in the DB; pass `--overwrite` to re-scrape
+everything, which updates `date_last_scraped` every run and appends to a
+per-performance price `history` only when the min/max price changes.
 
 #### Database schema
 

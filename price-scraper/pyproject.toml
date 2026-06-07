@@ -8,6 +8,11 @@ dependencies = [
     "playwright>=1.60.0",
 ]
 
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+]
+
 [project.scripts]
 price-scraper = "price_scraper.__main__:main"
 
