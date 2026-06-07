@@ -31,6 +31,14 @@ def init_client_tracking() -> None:
             conn.execute("ALTER TABLE clients ADD COLUMN client_version TEXT")
         except Exception:
             pass
+        try:
+            conn.execute("ALTER TABLE clients ADD COLUMN first_ip TEXT")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE clients ADD COLUMN last_ip TEXT")
+        except Exception:
+            pass
         # Migrate old hyphenated column names to underscores
         try:
             conn.execute('UPDATE clients SET client_os = "client-os" WHERE client_os IS NULL AND "client-os" IS NOT NULL')
@@ -54,8 +62,13 @@ def _is_valid_uuid(value: str) -> bool:
         return False
 
 
-def track_client(client_uuid: str, client_os: str | None = None, client_version: str | None = None) -> None:
-    """Upsert a client record, setting first_seen on insert and updating last_seen."""
+def track_client(
+    client_uuid: str,
+    client_os: str | None = None,
+    client_version: str | None = None,
+    client_ip: str | None = None,
+) -> None:
+    """Upsert a client record, setting first_seen/first_ip on insert and updating last_seen/last_ip."""
     if not _is_valid_uuid(client_uuid):
         logger.warning(f"Ignoring invalid client UUID: {client_uuid}")
         return
@@ -64,8 +77,8 @@ def track_client(client_uuid: str, client_os: str | None = None, client_version:
 
     with get_db_connection() as conn:
         conn.execute("""
-            INSERT INTO clients (uuid, first_seen, last_seen, request_count, days_count, client_os, client_version)
-            VALUES (?, ?, ?, 1, 1, ?, ?)
+            INSERT INTO clients (uuid, first_seen, last_seen, request_count, days_count, client_os, client_version, first_ip, last_ip)
+            VALUES (?, ?, ?, 1, 1, ?, ?, ?, ?)
             ON CONFLICT(uuid) DO UPDATE SET
                 last_seen = excluded.last_seen,
                 request_count = request_count + 1,
@@ -74,6 +87,8 @@ def track_client(client_uuid: str, client_os: str | None = None, client_version:
                     ELSE 0
                 END,
                 client_os = COALESCE(excluded.client_os, clients.client_os),
-                client_version = COALESCE(excluded.client_version, clients.client_version)
-        """, (client_uuid, now, now, client_os, client_version))
+                client_version = COALESCE(excluded.client_version, clients.client_version),
+                first_ip = COALESCE(clients.first_ip, excluded.first_ip),
+                last_ip = COALESCE(excluded.last_ip, clients.last_ip)
+        """, (client_uuid, now, now, client_os, client_version, client_ip, client_ip))
     logger.info(f"Tracked client: {client_uuid}")

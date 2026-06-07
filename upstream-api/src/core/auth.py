@@ -121,11 +121,21 @@ def is_valid_api_key(key: str) -> bool:
     return key.strip() in _valid_api_keys
 
 
+def get_client_ip(request) -> str:
+    """
+    Return the true client IP.
+
+    The app sits behind a Cloudflare tunnel, so request.remote_addr is the
+    tunnel's address. Cloudflare passes the real client IP in CF-Connecting-IP.
+    """
+    return request.headers.get("CF-Connecting-IP") or request.remote_addr
+
+
 def require_api_key():
     """
     Flask before_request handler to check x-api-key header.
     This should be registered with @app.before_request.
-    
+
     Returns:
         None if authentication passes, or a Flask response if it fails
     """
@@ -143,12 +153,12 @@ def require_api_key():
     api_key = request.headers.get("x-api-key") or request.headers.get("X-API-Key")
     
     if not api_key:
-        logger.warning(f"Authentication failed: Missing x-api-key header from {request.remote_addr}")
+        logger.warning(f"Authentication failed: Missing x-api-key header from {get_client_ip(request)}")
         from flask import Response
         return Response(status=403)
     
     if not is_valid_api_key(api_key):
-        logger.warning(f"Authentication failed: Invalid API key from {request.remote_addr}")
+        logger.warning(f"Authentication failed: Invalid API key from {get_client_ip(request)}")
         return jsonify({"error": "Invalid API key"}), 403
     
     # Authentication passed

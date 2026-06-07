@@ -54,6 +54,28 @@ ALLOW_FORCE_REFRESH = os.getenv("ALLOW_FORCE_REFRESH", "true").lower() not in ("
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes and origins
 
+
+class CloudflareRemoteAddr:
+    """WSGI middleware to surface the true client IP.
+
+    The app sits behind a Cloudflare tunnel, so the WSGI REMOTE_ADDR is the
+    tunnel's address (e.g. 172.28.0.x). Cloudflare passes the real client IP in
+    the CF-Connecting-IP header. Rewriting REMOTE_ADDR here makes both gunicorn's
+    access log (%(h)s) and Flask's request.remote_addr report the real client.
+    """
+
+    def __init__(self, wsgi_app):
+        self.wsgi_app = wsgi_app
+
+    def __call__(self, environ, start_response):
+        cf_ip = environ.get("HTTP_CF_CONNECTING_IP")
+        if cf_ip:
+            environ["REMOTE_ADDR"] = cf_ip
+        return self.wsgi_app(environ, start_response)
+
+
+app.wsgi_app = CloudflareRemoteAddr(app.wsgi_app)
+
 # Load API keys at startup
 try:
     load_api_keys()
@@ -93,7 +115,7 @@ def track_client_id():
         try:
             client_os = request.headers.get("X-Client-OS")
             client_version = request.headers.get("X-Client-Version")
-            track_client(client_id, client_os=client_os, client_version=client_version)
+            track_client(client_id, client_os=client_os, client_version=client_version, client_ip=request.remote_addr)
         except Exception as e:
             logger.error(f"Failed to track client {client_id}: {e}")
 
