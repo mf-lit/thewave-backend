@@ -152,6 +152,7 @@ def prewarm_upcoming_days():
     from src.core.history import normalize_calendar_response
     from src.core.performance_temperature import add_temperature_to_performances
     from src.core.performance_floodlights import add_floodlights_to_performances
+    from src.core.weather_forecast import add_weather_to_performances
     import main
 
     test_mode = os.getenv("TEST_MODE", "").lower() in ("true", "1", "yes")
@@ -172,6 +173,7 @@ def prewarm_upcoming_days():
         # time-dependent and must be re-applied per request.
         add_temperature_to_performances(response_data)
         add_floodlights_to_performances(response_data)
+        add_weather_to_performances(response_data)
 
         logger.info(f"Successfully pre-warmed cache for {today_str} ({PREWARM_DAYS} days)")
 

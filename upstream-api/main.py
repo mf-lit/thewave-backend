@@ -22,6 +22,7 @@ from src.core.history import build_multi_day_response, normalize_calendar_respon
 from src.core.performance_temperature import add_temperature_to_performances
 from src.core.performance_floodlights import add_floodlights_to_performances
 from src.core.performance_price import add_prices_to_performances
+from src.core.weather_forecast import add_weather_to_performances
 from src.core.auth import load_api_keys, require_api_key
 from src.core.client_tracker import init_client_tracking, track_client
 from src.core.weather import (
@@ -260,6 +261,7 @@ def _fetch_current_days(date_from, number_of_days_str, number_of_days, refresh):
     response_data = add_temperature_to_performances(response_data)
     response_data = add_floodlights_to_performances(response_data)
     response_data = add_prices_to_performances(response_data)
+    response_data = add_weather_to_performances(response_data)
     return jsonify(_format_response_with_expires(response_data, expires))
 
 
