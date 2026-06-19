@@ -393,8 +393,25 @@ def add_temperature_to_performances(data: dict) -> dict:
                     # nothing — a stuck sensor freezing the current reading, a
                     # stale forecast with no nearby hour, a gap in the historical
                     # DB. Backfill from the most recent known reading and flag it.
+                    #
+                    # Scope must match the forecast window: future slots more
+                    # than 7 days out are intentionally left bare (we have no
+                    # forecast nor any reading for them — a "prediction" that far
+                    # ahead would just be today's value, which is meaningless).
+                    eligible_for_fallback = True
+                    if status == "future":
+                        if date_str and time_str:
+                            try:
+                                perf_time = _parse_performance_datetime(date_str, time_str)
+                                eligible_for_fallback = perf_time <= now + timedelta(days=7)
+                            except (ValueError, KeyError):
+                                eligible_for_fallback = False
+                        else:
+                            eligible_for_fallback = False
+
                     if (
-                        performance.get("waterTemperature") is None
+                        eligible_for_fallback
+                        and performance.get("waterTemperature") is None
                         and performance.get("predictedWaterTemp") is None
                     ):
                         fallback = _get_latest_known_temperature()
