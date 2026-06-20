@@ -1,7 +1,7 @@
 import sqlite3
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
@@ -76,15 +76,27 @@ def store_water_temperature(temperature: float, recorded_at: datetime | None = N
     """
     Store a water temperature reading in the database.
 
+    Timestamps are persisted as naive UTC (no offset), independent of the host
+    timezone. Upstream performance times are Europe/London local, so the read
+    side (performance_temperature) converts London->UTC before matching against
+    these rows. Storing UTC also avoids the DST fall-back duplicate-hour
+    ambiguity that local time would introduce.
+
     Args:
         temperature: Water temperature in degrees
-        recorded_at: Timestamp when the temperature was recorded. If None, uses current time.
+        recorded_at: Timestamp when the temperature was recorded. If None, uses
+            the current UTC time. A tz-aware value is converted to UTC; a naive
+            value is assumed to already be UTC.
 
     Returns:
         int: ID of the inserted record
     """
     if recorded_at is None:
-        recorded_at = datetime.now()
+        recorded_at = datetime.now(timezone.utc)
+
+    # Normalise to naive UTC for a consistent, offset-free stored representation.
+    if recorded_at.tzinfo is not None:
+        recorded_at = recorded_at.astimezone(timezone.utc).replace(tzinfo=None)
 
     recorded_at_str = recorded_at.isoformat()
 

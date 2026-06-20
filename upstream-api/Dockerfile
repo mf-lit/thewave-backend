@@ -1,10 +1,14 @@
 # Use Python 3.12 slim image as base
 FROM python:3.12-slim
 
-# Install system dependencies and create non-root user
+# Install system dependencies and create non-root user.
+# tzdata ships the zoneinfo database (absent from slim images); with TZ set
+# below it makes the container's wall clock Europe/London, matching the
+# upstream performance times the app reasons about.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    curl && \
+    curl \
+    tzdata && \
     rm -rf /var/lib/apt/lists/* && \
     groupadd -r appuser && \
     useradd -r -g appuser appuser
@@ -41,6 +45,11 @@ ENV PORT=5000
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV FLASK_ENV=production
+# Run the container's wall clock in UK local time. Upstream performance
+# date/time strings are Europe/London with no offset, and the app compares
+# them against datetime.now(); without this the slim image runs UTC and a
+# just-started performance is misclassified "future" during BST.
+ENV TZ=Europe/London
 
 # Health check
 # HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \

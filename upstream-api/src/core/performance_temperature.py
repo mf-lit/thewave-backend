@@ -1,11 +1,17 @@
 import logging
 import os
 import csv
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
+
+# Upstream serves performance date/time in this local zone (no offset in the
+# strings); the water-temperature DB stores naive UTC. We bridge the two when
+# matching a performance to a historical reading.
+LONDON_TZ = ZoneInfo("Europe/London")
 
 # Path to forecast CSV file
 FORECAST_CSV_PATH = os.path.join(
@@ -76,6 +82,24 @@ def _get_performance_status(performance: dict, now: datetime) -> Literal["past",
         return "future"
 
 
+def _london_naive_to_utc_naive(dt_local: datetime) -> datetime:
+    """
+    Convert a naive Europe/London datetime (as parsed from upstream performance
+    fields) to a naive UTC datetime, to match the DB's UTC-stamped readings.
+
+    Args:
+        dt_local: Naive datetime interpreted as Europe/London local time.
+
+    Returns:
+        datetime: Equivalent naive UTC datetime.
+    """
+    return (
+        dt_local.replace(tzinfo=LONDON_TZ)
+        .astimezone(timezone.utc)
+        .replace(tzinfo=None)
+    )
+
+
 @lru_cache(maxsize=HISTORICAL_TEMP_CACHE_SIZE)
 def _get_temperature_for_time_cached(target_time_iso: str) -> float | None:
     """
@@ -83,7 +107,9 @@ def _get_temperature_for_time_cached(target_time_iso: str) -> float | None:
     Looks for the closest temperature reading in the database.
 
     Args:
-        target_time_iso: ISO format string of the target time (for cache key hashability)
+        target_time_iso: ISO format string of the target time in UTC (naive),
+            used as the hashable cache key. Must already be UTC since DB rows
+            are stored in UTC.
 
     Returns:
         float | None: Temperature if found, None otherwise
@@ -124,12 +150,16 @@ def _get_temperature_for_time(target_time: datetime) -> float | None:
     Results are cached using LRU cache since historical data doesn't change.
 
     Args:
-        target_time: The time to get temperature for
+        target_time: The time to get temperature for, as a naive Europe/London
+            local datetime (the form upstream performance fields are parsed to).
 
     Returns:
         float | None: Temperature if found, None otherwise
     """
-    return _get_temperature_for_time_cached(target_time.isoformat())
+    # DB readings are stored in UTC; convert the London-local performance time
+    # before looking up so BST/GMT offsets don't shift the match by an hour.
+    target_utc = _london_naive_to_utc_naive(target_time)
+    return _get_temperature_for_time_cached(target_utc.isoformat())
 
 
 def _current_forecast_mtime() -> float | None:
@@ -208,28 +238,29 @@ def _load_forecast_data() -> dict[datetime, float]:
     return _forecast_cache["data"]
 
 
-def _get_predicted_temperature(target_time: datetime) -> tuple[float | None, bool]:
+def _get_predicted_temperature(target_time: datetime) -> float | None:
     """
     Get predicted water temperature for a specific time from the forecast.
     If the performance doesn't start on the hour, uses the next hour's forecast.
+
+    Only a genuine in-horizon forecast for that exact hour is returned. When the
+    forecast holds no value for the hour — an internal gap, an on-the-hour slot
+    the grid skipped, or a slot beyond the last forecast hour because the
+    pipeline is stale — this returns None and ``predictedWaterTemp`` is left
+    unset rather than substituting a nearby / carried-forward hour.
 
     Args:
         target_time: The time to get predicted temperature for
 
     Returns:
-        tuple[float | None, bool]: (temperature, is_estimate).
-            - temperature is None only when the forecast holds no data at all.
-            - is_estimate is True when the exact forecast hour was unavailable
-              and the nearest / carried-forward hour was substituted instead
-              (e.g. the forecast pipeline is stale because of a stuck sensor and
-              the slot sits beyond the last forecast hour, or the hourly grid
-              skipped this exact hour).
+        float | None: The predicted temperature, or None when the forecast has
+            no value for the target hour.
     """
     try:
         forecast_data = _load_forecast_data()
 
         if not forecast_data:
-            return None, False
+            return None
 
         # Round up to the next hour if not on the hour
         if target_time.minute != 0 or target_time.second != 0:
@@ -242,24 +273,14 @@ def _get_predicted_temperature(target_time: datetime) -> tuple[float | None, boo
         if next_hour in forecast_data:
             temp = round(forecast_data[next_hour], 1)
             logger.debug(f"Found predicted temperature {temp}°C for {next_hour.isoformat()}")
-            return temp, False
+            return temp
 
-        # No exact hour available. Rather than return nothing, substitute the
-        # closest forecast hour we do have. This covers internal gaps, an
-        # on-the-hour slot the grid happens to skip, and — most importantly —
-        # slots beyond the last forecast hour when the pipeline is stale, where
-        # the closest hour is the final (carried-forward) forecast value.
-        closest_hour = min(forecast_data.keys(), key=lambda h: abs(h - next_hour))
-        temp = round(forecast_data[closest_hour], 1)
-        logger.debug(
-            f"No exact forecast for {next_hour.isoformat()}; substituting nearest "
-            f"{closest_hour.isoformat()} ({temp}°C, marked as estimate)"
-        )
-        return temp, True
+        logger.debug(f"No forecast value for {next_hour.isoformat()}; leaving predictedWaterTemp unset")
+        return None
 
     except Exception as e:
         logger.error(f"Error getting predicted temperature: {e}")
-        return None, False
+        return None
 
 
 def _get_latest_known_temperature() -> float | None:
@@ -314,15 +335,15 @@ def add_temperature_to_performances(data: dict) -> dict:
     Rules:
     - Past performances: Get temperature from database for that time
     - Current performances (happening now): Get current temperature via get_water_temperature
-    - Future performances: Get predicted temperature from the forecast
+    - Future performances: Get predicted temperature from the forecast. Only a
+      genuine forecast value for the exact hour is used; when the forecast has
+      no value for the hour, ``predictedWaterTemp`` is left unset.
 
-    Safety net: whatever the status, if a performance would otherwise carry
-    neither ``waterTemperature`` nor ``predictedWaterTemp`` (stuck sensor, stale
-    forecast pipeline, gap in the historical DB, ...), it is backfilled with the
-    most recent known reading and flagged ``waterTempIsEstimate: true`` so at
-    least one temperature is always served. ``waterTempIsEstimate`` is also set
-    when a future slot's forecast hour had to be substituted by a nearby /
-    carried-forward hour. The flag is only present when True.
+    Safety net (past/current only): if such a performance would otherwise carry
+    neither ``waterTemperature`` nor ``predictedWaterTemp`` (stuck sensor, gap in
+    the historical DB), it is backfilled with the most recent known reading and
+    flagged ``waterTempIsEstimate: true``. Future slots are never backfilled —
+    a missing forecast leaves them bare. The flag is only present when True.
 
     Args:
         data: Calendar response data with days and performances
@@ -331,7 +352,13 @@ def add_temperature_to_performances(data: dict) -> dict:
         dict: Modified data with temperature field added to applicable performances
     """
     try:
-        now = datetime.now()
+        # Performance date/time strings are Europe/London wall-clock with no
+        # offset, so "now" must be London wall-clock too. Using a bare
+        # datetime.now() takes the host/container clock (UTC in the Docker
+        # image), which during BST runs an hour behind London and leaves a
+        # just-started performance classified "future" — and future slots never
+        # receive waterTemperature nor the safety-net fallback.
+        now = datetime.now(LONDON_TZ).replace(tzinfo=None)
         days = data.get("days", [])
 
         for day in days:
@@ -350,15 +377,12 @@ def add_temperature_to_performances(data: dict) -> dict:
                                 perf_time = _parse_performance_datetime(date_str, time_str)
                                 # Check if within next 7 days
                                 if perf_time <= now + timedelta(days=7):
-                                    predicted_temp, is_estimate = _get_predicted_temperature(perf_time)
+                                    predicted_temp = _get_predicted_temperature(perf_time)
                                     if predicted_temp is not None:
                                         performance["predictedWaterTemp"] = predicted_temp
-                                        if is_estimate:
-                                            performance["waterTempIsEstimate"] = True
                                         logger.debug(
                                             f"Added predicted temperature {predicted_temp}°C to performance "
                                             f"{performance.get('performanceAK', 'unknown')}"
-                                            f"{' (estimate)' if is_estimate else ''}"
                                         )
                             except (ValueError, KeyError) as e:
                                 logger.error(f"Error getting predicted temperature for future performance: {e}")
@@ -388,38 +412,24 @@ def add_temperature_to_performances(data: dict) -> dict:
                             except (ValueError, KeyError) as e:
                                 logger.error(f"Error getting temperature for past performance: {e}")
 
-                    # Safety net: guarantee every performance carries at least
-                    # one temperature. Fires when the steps above produced
+                    # Safety net for past/current performances: guarantee they
+                    # carry a temperature even when the steps above produced
                     # nothing — a stuck sensor freezing the current reading, a
-                    # stale forecast with no nearby hour, a gap in the historical
-                    # DB. Backfill from the most recent known reading and flag it.
+                    # gap in the historical DB. Backfill from the most recent
+                    # known reading and flag it.
                     #
-                    # Scope must match the forecast window: future slots more
-                    # than 7 days out are intentionally left bare (we have no
-                    # forecast nor any reading for them — a "prediction" that far
-                    # ahead would just be today's value, which is meaningless).
-                    eligible_for_fallback = True
-                    if status == "future":
-                        if date_str and time_str:
-                            try:
-                                perf_time = _parse_performance_datetime(date_str, time_str)
-                                eligible_for_fallback = perf_time <= now + timedelta(days=7)
-                            except (ValueError, KeyError):
-                                eligible_for_fallback = False
-                        else:
-                            eligible_for_fallback = False
-
+                    # Future slots are deliberately excluded: predictedWaterTemp
+                    # must only ever hold a genuine forecast value, so when the
+                    # forecast has nothing for the hour the slot is left bare
+                    # rather than backfilled with the latest observation.
                     if (
-                        eligible_for_fallback
+                        status != "future"
                         and performance.get("waterTemperature") is None
                         and performance.get("predictedWaterTemp") is None
                     ):
                         fallback = _get_latest_known_temperature()
                         if fallback is not None:
-                            if status == "future":
-                                performance["predictedWaterTemp"] = fallback
-                            else:
-                                performance["waterTemperature"] = fallback
+                            performance["waterTemperature"] = fallback
                             performance["waterTempIsEstimate"] = True
                             logger.info(
                                 f"Applied fallback temperature {fallback}°C to performance "
