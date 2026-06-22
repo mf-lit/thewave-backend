@@ -1,7 +1,8 @@
 import sqlite3
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
@@ -15,6 +16,16 @@ DB_PATH = os.path.join(
 
 # Database timeout in seconds (how long to wait for a lock)
 DB_TIMEOUT = float(os.getenv("DB_TIMEOUT", "30.0"))
+
+# Stuck-sensor detection: the upstream sensor occasionally freezes, repeating the
+# same reading indefinitely. We treat the reading as stuck once it has not changed
+# for this many hours, looking back over a wider window to capture the full run.
+STUCK_THRESHOLD_HOURS = 6
+STUCK_DETECTION_WINDOW_HOURS = 48
+
+# Stored timestamps are UTC; the "since" reported to clients is localized to
+# Europe/London to match the rest of the user-facing timing in this service.
+LONDON_TZ = ZoneInfo("Europe/London")
 
 
 @contextmanager
@@ -58,7 +69,8 @@ def init_database() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 temperature REAL NOT NULL,
                 recorded_at TEXT NOT NULL,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                valid INTEGER NOT NULL DEFAULT 1
             )
         """)
 
@@ -67,6 +79,15 @@ def init_database() -> None:
             CREATE INDEX IF NOT EXISTS idx_recorded_at
             ON water_temperature(recorded_at)
         """)
+
+        # Migrate pre-existing tables that predate the `valid` column. Adding it
+        # with DEFAULT 1 marks every existing row valid, so backfill once to
+        # apply the stuck-run rule to historical data.
+        columns = {row["name"] for row in cursor.execute("PRAGMA table_info(water_temperature)")}
+        if "valid" not in columns:
+            logger.info("Adding `valid` column to water_temperature and backfilling")
+            cursor.execute("ALTER TABLE water_temperature ADD COLUMN valid INTEGER NOT NULL DEFAULT 1")
+            _backfill_validity(conn)
 
         conn.commit()
         logger.info(f"Water temperature database initialized at {DB_PATH}")
@@ -108,6 +129,12 @@ def store_water_temperature(temperature: float, recorded_at: datetime | None = N
         """, (temperature, recorded_at_str))
 
         record_id = cursor.lastrowid
+
+        # Maintain the `valid` flag for the run this reading belongs to. If the
+        # sensor has now been frozen on one value for >= STUCK_THRESHOLD_HOURS,
+        # this also retroactively invalidates the mid-run rows written earlier.
+        _update_validity_for_new_reading(conn, recorded_at_str, temperature)
+
         logger.info(f"Stored water temperature: {temperature}°C at {recorded_at_str} (ID: {record_id})")
         return record_id
 
@@ -122,7 +149,7 @@ def get_latest_temperature() -> dict | None:
     with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT id, temperature, recorded_at, created_at
+            SELECT id, temperature, recorded_at, created_at, valid
             FROM water_temperature
             ORDER BY recorded_at DESC
             LIMIT 1
@@ -134,7 +161,8 @@ def get_latest_temperature() -> dict | None:
                 "id": row["id"],
                 "temperature": row["temperature"],
                 "recorded_at": row["recorded_at"],
-                "created_at": row["created_at"]
+                "created_at": row["created_at"],
+                "valid": bool(row["valid"])
             }
         return None
 
@@ -155,7 +183,7 @@ def get_temperature_history(limit: int = 100, start_date: str | None = None, end
         cursor = conn.cursor()
 
         query = """
-            SELECT id, temperature, recorded_at, created_at
+            SELECT id, temperature, recorded_at, created_at, valid
             FROM water_temperature
             WHERE 1=1
         """
@@ -180,7 +208,198 @@ def get_temperature_history(limit: int = 100, start_date: str | None = None, end
                 "id": row["id"],
                 "temperature": row["temperature"],
                 "recorded_at": row["recorded_at"],
-                "created_at": row["created_at"]
+                "created_at": row["created_at"],
+                "valid": bool(row["valid"])
             }
             for row in rows
         ]
+
+
+def _parse_recorded_at(recorded_at: str) -> datetime:
+    """
+    Parse a stored recorded_at value (naive UTC ISO-8601) into a UTC-aware datetime.
+    """
+    parsed = datetime.fromisoformat(recorded_at)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _update_validity_for_new_reading(conn: sqlite3.Connection, recorded_at_str: str,
+                                     temperature: float) -> None:
+    """
+    Update the `valid` flag for the frozen-value run that the just-inserted
+    reading belongs to.
+
+    A "run" is a maximal sequence of consecutive readings (by recorded_at) with
+    the same temperature. Once a run's span reaches STUCK_THRESHOLD_HOURS the
+    first reading stays valid and every later reading in the run is invalid.
+
+    We anchor on the run boundary rather than re-scanning a bounded window so
+    this stays correct for runs longer than the detection window, and we only
+    ever flip valid 1 -> 0 (validity is monotonic within a run). The first
+    reading's flag is never touched here — it was written valid when the value
+    last changed and remains so.
+
+    Args:
+        conn: Open connection (the same transaction as the insert).
+        recorded_at_str: recorded_at of the new reading (naive-UTC ISO string).
+        temperature: The new reading's value.
+    """
+    cursor = conn.cursor()
+
+    # Boundary = the most recent earlier reading with a *different* value. Every
+    # row after it (up to and including the new one) shares the new value.
+    boundary = cursor.execute(
+        """
+        SELECT recorded_at FROM water_temperature
+        WHERE recorded_at < ? AND temperature != ?
+        ORDER BY recorded_at DESC LIMIT 1
+        """,
+        (recorded_at_str, temperature),
+    ).fetchone()
+
+    # run_start = earliest reading after the boundary (or the earliest overall
+    # when the whole table is one unbroken value).
+    if boundary is not None:
+        run_start = cursor.execute(
+            """
+            SELECT recorded_at FROM water_temperature
+            WHERE recorded_at > ? ORDER BY recorded_at ASC LIMIT 1
+            """,
+            (boundary["recorded_at"],),
+        ).fetchone()
+    else:
+        run_start = cursor.execute(
+            "SELECT recorded_at FROM water_temperature ORDER BY recorded_at ASC LIMIT 1"
+        ).fetchone()
+
+    if run_start is None:
+        return
+
+    span_hours = (
+        _parse_recorded_at(recorded_at_str) - _parse_recorded_at(run_start["recorded_at"])
+    ).total_seconds() / 3600
+
+    if span_hours < STUCK_THRESHOLD_HOURS:
+        return
+
+    # Invalidate every run member after the first: the mid-run rows written
+    # before detection and the new reading, in one statement.
+    cursor.execute(
+        """
+        UPDATE water_temperature SET valid = 0
+        WHERE recorded_at > ? AND recorded_at <= ?
+        """,
+        (run_start["recorded_at"], recorded_at_str),
+    )
+
+
+def _backfill_validity(conn: sqlite3.Connection) -> None:
+    """
+    One-time pass over the whole table applying the stuck-run validity rule, used
+    when the `valid` column is first added. Groups consecutive equal-temperature
+    readings into runs and invalidates every row except the first in any run
+    whose span reaches STUCK_THRESHOLD_HOURS.
+    """
+    cursor = conn.cursor()
+    rows = cursor.execute(
+        "SELECT id, temperature, recorded_at FROM water_temperature ORDER BY recorded_at ASC"
+    ).fetchall()
+
+    invalid_ids: list[int] = []
+    run: list[sqlite3.Row] = []
+
+    def flush(run_rows: list[sqlite3.Row]) -> None:
+        if len(run_rows) < 2:
+            return
+        span_hours = (
+            _parse_recorded_at(run_rows[-1]["recorded_at"])
+            - _parse_recorded_at(run_rows[0]["recorded_at"])
+        ).total_seconds() / 3600
+        if span_hours >= STUCK_THRESHOLD_HOURS:
+            invalid_ids.extend(r["id"] for r in run_rows[1:])
+
+    for row in rows:
+        if run and row["temperature"] != run[-1]["temperature"]:
+            flush(run)
+            run = []
+        run.append(row)
+    flush(run)
+
+    if invalid_ids:
+        cursor.executemany(
+            "UPDATE water_temperature SET valid = 0 WHERE id = ?",
+            [(i,) for i in invalid_ids],
+        )
+        logger.info(f"Backfilled validity: marked {len(invalid_ids)} stuck readings invalid")
+
+
+def _not_stuck() -> dict:
+    return {"stuck": False, "since": None, "hours": None}
+
+
+def _compute_stuck_status(readings: list[dict], now: datetime,
+                          threshold_hours: float = STUCK_THRESHOLD_HOURS) -> dict:
+    """
+    Determine whether the water-temperature sensor is stuck (frozen on one value).
+
+    Args:
+        readings: Temperature records newest-first (as returned by
+            get_temperature_history), each with "temperature" and "recorded_at".
+        now: Current UTC-aware time (unused for the span but kept for clarity/extension).
+        threshold_hours: Unchanged at least this long => stuck.
+
+    Returns:
+        dict: {"stuck": bool, "since": ISO-8601 str | None, "hours": float | None}.
+        When not stuck, "since" and "hours" are None.
+    """
+    if len(readings) < 2:
+        return _not_stuck()
+
+    latest_value = readings[0]["temperature"]
+
+    # Walk forward (back in time) while the value matches; the last matching row
+    # is the start of the frozen run. Span-based so it tolerates gaps and
+    # duplicate rows within an hour.
+    run_start = readings[0]
+    for reading in readings[1:]:
+        if reading["temperature"] != latest_value:
+            break
+        run_start = reading
+
+    latest_time = _parse_recorded_at(readings[0]["recorded_at"])
+    run_start_time = _parse_recorded_at(run_start["recorded_at"])
+    span_hours = (latest_time - run_start_time).total_seconds() / 3600
+
+    if span_hours < threshold_hours:
+        return _not_stuck()
+
+    return {
+        "stuck": True,
+        "since": run_start_time.astimezone(LONDON_TZ).isoformat(),
+        "hours": round(span_hours, 1),
+    }
+
+
+def get_stuck_sensor_status() -> dict:
+    """
+    Check the recent temperature history and report whether the sensor is stuck.
+
+    Reads from the DB independently of the live weather cache. Any failure
+    degrades to a not-stuck result rather than propagating, so callers
+    (e.g. the /wave-weather endpoint) never fail solely on this check.
+
+    Returns:
+        dict: {"stuck": bool, "since": ISO-8601 str | None, "hours": float | None}.
+    """
+    try:
+        now = datetime.now(timezone.utc)
+        window_start = (now - timedelta(hours=STUCK_DETECTION_WINDOW_HOURS))
+        # Stored recorded_at is naive UTC, so compare against a naive-UTC string.
+        start_date = window_start.replace(tzinfo=None).isoformat()
+        readings = get_temperature_history(limit=200, start_date=start_date)
+        return _compute_stuck_status(readings, now)
+    except Exception as e:
+        logger.warning(f"Stuck-sensor detection failed: {e}")
+        return _not_stuck()

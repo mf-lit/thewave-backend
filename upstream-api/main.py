@@ -29,6 +29,7 @@ from src.core.weather import (
     get_cached_weather,
     fetch_and_cache_weather
 )
+from src.core.water_temp_db import get_stuck_sensor_status
 # Don't import scheduler at module level to avoid circular imports
 
 # Set up logging
@@ -397,15 +398,18 @@ def wave_weather_endpoint():
     cached_result = get_cached_weather()
     if cached_result is not None:
         weather_data, expires = cached_result
-        return jsonify(_format_response_with_expires(weather_data, expires))
+    else:
+        # Fetch from upstream and cache
+        try:
+            weather_data, expires = fetch_and_cache_weather()
+        except (requests.exceptions.RequestException, ValueError) as e:
+            logger.error(f"Weather scrape failed: {str(e)}")
+            return jsonify({"error": f"Failed to fetch weather data: {str(e)}"}), 500
 
-    # Fetch from upstream and cache
-    try:
-        weather_data, expires = fetch_and_cache_weather()
-        return jsonify(_format_response_with_expires(weather_data, expires))
-    except (requests.exceptions.RequestException, ValueError) as e:
-        logger.error(f"Weather scrape failed: {str(e)}")
-        return jsonify({"error": f"Failed to fetch weather data: {str(e)}"}), 500
+    # Flag whether the sensor has frozen on a single reading. Built as a fresh
+    # dict so the shared in-memory weather cache entry is not mutated.
+    body = {**weather_data, "sensor_stuck": get_stuck_sensor_status()}
+    return jsonify(_format_response_with_expires(body, expires))
 
 
 # Initialize scheduler for daily archive task (only when app runs, not at import time)

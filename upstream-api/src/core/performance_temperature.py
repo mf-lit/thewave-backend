@@ -101,7 +101,7 @@ def _london_naive_to_utc_naive(dt_local: datetime) -> datetime:
 
 
 @lru_cache(maxsize=HISTORICAL_TEMP_CACHE_SIZE)
-def _get_temperature_for_time_cached(target_time_iso: str) -> float | None:
+def _get_temperature_for_time_cached(target_time_iso: str) -> tuple[float, bool] | None:
     """
     Get the water temperature for a specific time (cached version).
     Looks for the closest temperature reading in the database.
@@ -112,7 +112,9 @@ def _get_temperature_for_time_cached(target_time_iso: str) -> float | None:
             are stored in UTC.
 
     Returns:
-        float | None: Temperature if found, None otherwise
+        tuple[float, bool] | None: (temperature, valid) for the closest reading,
+            or None if no reading is found. `valid` is the reading's stuck-sensor
+            flag (False when it belongs to a frozen run).
     """
     from src.core.water_temp_db import get_temperature_history
 
@@ -141,10 +143,10 @@ def _get_temperature_for_time_cached(target_time_iso: str) -> float | None:
     )
 
     logger.debug(f"Found temperature {closest['temperature']}°C for {target_time_iso}")
-    return closest["temperature"]
+    return closest["temperature"], bool(closest["valid"])
 
 
-def _get_temperature_for_time(target_time: datetime) -> float | None:
+def _get_temperature_for_time(target_time: datetime) -> tuple[float, bool] | None:
     """
     Get the water temperature for a specific time.
     Results are cached using LRU cache since historical data doesn't change.
@@ -154,7 +156,8 @@ def _get_temperature_for_time(target_time: datetime) -> float | None:
             local datetime (the form upstream performance fields are parsed to).
 
     Returns:
-        float | None: Temperature if found, None otherwise
+        tuple[float, bool] | None: (temperature, valid) for the closest reading,
+            or None if no reading is found.
     """
     # DB readings are stored in UTC; convert the London-local performance time
     # before looking up so BST/GMT offsets don't shift the match by an hour.
@@ -339,11 +342,17 @@ def add_temperature_to_performances(data: dict) -> dict:
       genuine forecast value for the exact hour is used; when the forecast has
       no value for the hour, ``predictedWaterTemp`` is left unset.
 
+    Whenever ``waterTemperature`` is set, ``waterTempIsValid`` is set alongside
+    it: the stuck-sensor ``valid`` flag of the underlying reading (past), whether
+    the sensor is currently un-stuck (current), or ``false`` for a safety-net
+    estimate. Future slots carry ``predictedWaterTemp`` only and get neither.
+
     Safety net (past/current only): if such a performance would otherwise carry
     neither ``waterTemperature`` nor ``predictedWaterTemp`` (stuck sensor, gap in
     the historical DB), it is backfilled with the most recent known reading and
-    flagged ``waterTempIsEstimate: true``. Future slots are never backfilled —
-    a missing forecast leaves them bare. The flag is only present when True.
+    flagged ``waterTempIsEstimate: true`` (and ``waterTempIsValid: false``).
+    Future slots are never backfilled — a missing forecast leaves them bare. The
+    estimate flag is only present when True.
 
     Args:
         data: Calendar response data with days and performances
@@ -360,6 +369,11 @@ def add_temperature_to_performances(data: dict) -> dict:
         # receive waterTemperature nor the safety-net fallback.
         now = datetime.now(LONDON_TZ).replace(tzinfo=None)
         days = data.get("days", [])
+
+        # Computed on demand the first time a 'current' performance needs it (the
+        # live reading carries no per-row valid flag), then reused for the rest of
+        # this response. Left None for all-past/all-future calls to avoid the query.
+        sensor_stuck: bool | None = None
 
         for day in days:
             performances = day.get("performances", [])
@@ -391,7 +405,11 @@ def add_temperature_to_performances(data: dict) -> dict:
                         # Get current temperature for ongoing performances
                         temp = _get_current_temperature()
                         if temp is not None:
+                            if sensor_stuck is None:
+                                from src.core.water_temp_db import get_stuck_sensor_status
+                                sensor_stuck = bool(get_stuck_sensor_status().get("stuck"))
                             performance["waterTemperature"] = temp
+                            performance["waterTempIsValid"] = not sensor_stuck
                             logger.info(
                                 f"Added current temperature {temp}°C to performance "
                                 f"{performance.get('performanceAK', 'unknown')}"
@@ -402,11 +420,13 @@ def add_temperature_to_performances(data: dict) -> dict:
                         if date_str and time_str:
                             try:
                                 perf_time = _parse_performance_datetime(date_str, time_str)
-                                temp = _get_temperature_for_time(perf_time)
-                                if temp is not None:
+                                result = _get_temperature_for_time(perf_time)
+                                if result is not None:
+                                    temp, is_valid = result
                                     performance["waterTemperature"] = temp
+                                    performance["waterTempIsValid"] = is_valid
                                     logger.info(
-                                        f"Added historical temperature {temp}°C to performance "
+                                        f"Added historical temperature {temp}°C (valid={is_valid}) to performance "
                                         f"{performance.get('performanceAK', 'unknown')}"
                                     )
                             except (ValueError, KeyError) as e:
@@ -430,6 +450,7 @@ def add_temperature_to_performances(data: dict) -> dict:
                         fallback = _get_latest_known_temperature()
                         if fallback is not None:
                             performance["waterTemperature"] = fallback
+                            performance["waterTempIsValid"] = False
                             performance["waterTempIsEstimate"] = True
                             logger.info(
                                 f"Applied fallback temperature {fallback}°C to performance "
