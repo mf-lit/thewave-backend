@@ -337,10 +337,16 @@ def add_temperature_to_performances(data: dict) -> dict:
 
     Rules:
     - Past performances: Get temperature from database for that time
-    - Current performances (happening now): Get current temperature via get_water_temperature
+    - Current performances (happening now): Get current temperature via
+      get_water_temperature, AND attach the forecast for the current hour as
+      ``predictedWaterTemp`` when one exists — so an in-progress performance
+      carries both the live reading and the prediction.
     - Future performances: Get predicted temperature from the forecast. Only a
       genuine forecast value for the exact hour is used; when the forecast has
       no value for the hour, ``predictedWaterTemp`` is left unset.
+
+    ``predictedWaterTemp`` only ever holds a genuine in-horizon forecast value
+    for the exact hour, whether attached to a current or a future performance.
 
     Whenever ``waterTemperature`` is set, ``waterTempIsValid`` is set alongside
     it: the stuck-sensor ``valid`` flag of the underlying reading (past), whether
@@ -414,6 +420,23 @@ def add_temperature_to_performances(data: dict) -> dict:
                                 f"Added current temperature {temp}°C to performance "
                                 f"{performance.get('performanceAK', 'unknown')}"
                             )
+
+                        # Also attach the forecast for the current hour, when one
+                        # exists, so in-progress performances expose both the live
+                        # reading and the prediction. As with future slots, only a
+                        # genuine in-horizon forecast value is used.
+                        if date_str and time_str:
+                            try:
+                                perf_time = _parse_performance_datetime(date_str, time_str)
+                                predicted_temp = _get_predicted_temperature(perf_time)
+                                if predicted_temp is not None:
+                                    performance["predictedWaterTemp"] = predicted_temp
+                                    logger.debug(
+                                        f"Added predicted temperature {predicted_temp}°C to current performance "
+                                        f"{performance.get('performanceAK', 'unknown')}"
+                                    )
+                            except (ValueError, KeyError) as e:
+                                logger.error(f"Error getting predicted temperature for current performance: {e}")
 
                     elif status == "past":
                         # Get historical temperature for past performances
