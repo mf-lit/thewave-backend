@@ -55,6 +55,7 @@ def _check_and_archive_day(date: str) -> bool:
     from src.core.wave_calendar import get_calendar, add_side_to_availability
     from src.core.performance_temperature import add_temperature_to_performances
     from src.core.performance_floodlights import add_floodlights_to_performances
+    from src.core.performance_price import add_prices_to_performances
 
     # Check if file already exists
     if load_historical_day(date) is not None:
@@ -70,7 +71,8 @@ def _check_and_archive_day(date: str) -> bool:
         # Add temperatures from database (all performances are past for historical dates)
         response_data = add_temperature_to_performances(response_data)
         response_data = add_floodlights_to_performances(response_data)
-        logger.info(f"Added temperatures and floodlights to performances for {date}")
+        response_data = add_prices_to_performances(response_data)
+        logger.info(f"Added temperatures, floodlights and prices to performances for {date}")
         save_daily_history(date, response_data)
         logger.info(f"Successfully archived missing historical data for {date}")
         return True
@@ -91,6 +93,7 @@ def archive_today_response():
     from src.core.wave_calendar import get_calendar, add_side_to_availability
     from src.core.performance_temperature import add_temperature_to_performances
     from src.core.performance_floodlights import add_floodlights_to_performances
+    from src.core.performance_price import add_prices_to_performances
 
     # Check if test mode is enabled (history only works in production)
     test_mode = os.getenv("TEST_MODE", "").lower() in ("true", "1", "yes")
@@ -112,7 +115,8 @@ def archive_today_response():
         # Add temperatures from database to all performances (they're all past by 23:59)
         response_data = add_temperature_to_performances(response_data)
         response_data = add_floodlights_to_performances(response_data)
-        logger.info(f"Added temperatures and floodlights to performances for {today_str}")
+        response_data = add_prices_to_performances(response_data)
+        logger.info(f"Added temperatures, floodlights and prices to performances for {today_str}")
 
         # Save to history
         save_daily_history(today_str, response_data)
