@@ -19,9 +19,17 @@ DB_TIMEOUT = float(os.getenv("DB_TIMEOUT", "30.0"))
 
 # Stuck-sensor detection: the upstream sensor occasionally freezes, repeating the
 # same reading indefinitely. We treat the reading as stuck once it has not changed
-# for this many hours, looking back over a wider window to capture the full run.
+# for this many hours. Detection only needs a recent window; reporting the true
+# onset needs a wider one (see below).
 STUCK_THRESHOLD_HOURS = 6
 STUCK_DETECTION_WINDOW_HOURS = 48
+
+# Once a freeze is detected, re-evaluate over this much wider lookback so the
+# reported "since"/"hours" reflect the real start of the frozen run rather than
+# the detection-window edge. Kept separate from (and larger than) the detection
+# window so the deep query is paid only in the rare stuck case, not on every
+# (usually not-stuck) call. A freeze older than this is still capped here.
+STUCK_ONSET_LOOKBACK_HOURS = int(os.getenv("STUCK_ONSET_LOOKBACK_HOURS", str(24 * 30)))
 
 # Stored timestamps are UTC; the "since" reported to clients is localized to
 # Europe/London to match the rest of the user-facing timing in this service.
@@ -390,6 +398,11 @@ def get_stuck_sensor_status() -> dict:
     degrades to a not-stuck result rather than propagating, so callers
     (e.g. the /wave-weather endpoint) never fail solely on this check.
 
+    Detection runs over the recent STUCK_DETECTION_WINDOW_HOURS window. When a
+    freeze is found, the run is re-evaluated over the wider
+    STUCK_ONSET_LOOKBACK_HOURS lookback so the reported "since"/"hours" reflect
+    the true start of the frozen run rather than the detection-window edge.
+
     Returns:
         dict: {"stuck": bool, "since": ISO-8601 str | None, "hours": float | None}.
     """
@@ -399,7 +412,23 @@ def get_stuck_sensor_status() -> dict:
         # Stored recorded_at is naive UTC, so compare against a naive-UTC string.
         start_date = window_start.replace(tzinfo=None).isoformat()
         readings = get_temperature_history(limit=200, start_date=start_date)
-        return _compute_stuck_status(readings, now)
+        status = _compute_stuck_status(readings, now)
+        if not status["stuck"]:
+            return status
+
+        # Stuck: the recent window may have truncated the run, so re-evaluate
+        # over a much wider lookback to find the true onset. Hourly readings mean
+        # ~1 row/hour; allow generous headroom for duplicate rows within an hour.
+        onset_start = (
+            (now - timedelta(hours=STUCK_ONSET_LOOKBACK_HOURS))
+            .replace(tzinfo=None)
+            .isoformat()
+        )
+        deep_readings = get_temperature_history(
+            limit=STUCK_ONSET_LOOKBACK_HOURS * 4,
+            start_date=onset_start,
+        )
+        return _compute_stuck_status(deep_readings, now)
     except Exception as e:
         logger.warning(f"Stuck-sensor detection failed: {e}")
         return _not_stuck()
