@@ -407,8 +407,13 @@ def wave_weather_endpoint():
             return jsonify({"error": f"Failed to fetch weather data: {str(e)}"}), 500
 
     # Flag whether the sensor has frozen on a single reading. Built as a fresh
-    # dict so the shared in-memory weather cache entry is not mutated.
-    body = {**weather_data, "sensor_stuck": get_stuck_sensor_status()}
+    # dict so the shared in-memory weather cache entry is not mutated. The
+    # sensor_stuck object is only included when the sensor is actually stuck;
+    # a healthy sensor returns no such key.
+    body = {**weather_data}
+    stuck_status = get_stuck_sensor_status()
+    if stuck_status.get("stuck"):
+        body["sensor_stuck"] = stuck_status
     return jsonify(_format_response_with_expires(body, expires))
 
 
