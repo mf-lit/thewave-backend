@@ -54,12 +54,17 @@ class SQLiteStorage:
                 thresholds TEXT,
                 notified_thresholds TEXT,
                 last_checked_availability INTEGER,
+                next_check_at TEXT,
                 created_at TEXT NOT NULL,
                 PRIMARY KEY (client_id, notification_id)
             )
         """)
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_performance_ak ON notifications(performance_ak)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_date ON notifications(date)")
+        try:
+            cursor.execute("ALTER TABLE notifications ADD COLUMN next_check_at TEXT")
+        except sqlite3.OperationalError:
+            pass  # column already exists
         self.conn.commit()
 
     def ensure_clients_table_exists(self) -> None:
@@ -184,10 +189,12 @@ class SQLiteStorage:
         return cursor.rowcount > 0
 
     def get_all_notifications(self) -> List[Dict[str, Any]]:
-        """Get all notifications across all clients (for daemon use)."""
+        """Get all notifications across all clients that are due for checking."""
         self.ensure_table_exists()
         cursor = self.conn.cursor()
-        cursor.execute("SELECT * FROM notifications")
+        cursor.execute(
+            "SELECT * FROM notifications WHERE next_check_at IS NULL OR next_check_at <= datetime('now')"
+        )
         return [self._dict_from_row(row) for row in cursor.fetchall()]
 
     def create_or_update_client_token(self, client_id: str, fcm_token: str) -> Dict[str, Any]:

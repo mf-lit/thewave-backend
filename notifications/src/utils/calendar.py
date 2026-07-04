@@ -1,6 +1,7 @@
 """Calendar API client for fetching session availability data."""
 import logging
 import os
+from datetime import datetime
 from typing import Dict, List, Optional
 
 import requests
@@ -65,30 +66,54 @@ def fetch_calendar_data(date_from: str, number_of_days: int) -> Dict:
     return response.json()
 
 
+def _group_consecutive_dates(dates: List[str]) -> List[List[str]]:
+    """Group a sorted list of date strings into runs of consecutive calendar days."""
+    if not dates:
+        return []
+    groups = []
+    current_group = [dates[0]]
+    for date in dates[1:]:
+        prev = datetime.strptime(current_group[-1], "%Y-%m-%d")
+        curr = datetime.strptime(date, "%Y-%m-%d")
+        if (curr - prev).days == 1:
+            current_group.append(date)
+        else:
+            groups.append(current_group)
+            current_group = [date]
+    groups.append(current_group)
+    return groups
+
+
 def fetch_calendar_data_for_dates(dates: List[str]) -> Dict:
     """Fetch calendar data for specific dates only.
 
-    Makes individual API calls for each date to minimize data fetched.
+    Consecutive dates are fetched in a single call using numberOfDays.
     """
     if not dates:
         return {"days": []}
 
     unique_dates = sorted(set(dates))
+    date_set = set(unique_dates)
+    groups = _group_consecutive_dates(unique_dates)
     base_url = _get_calendar_api_url()
     all_days = []
-    
+
     headers = {}
     api_key = _get_calendar_api_key()
     if api_key:
         headers["x-api-key"] = api_key
 
-    for date in unique_dates:
-        response = requests.get(base_url, params={"dateFrom": date, "numberOfDays": 1}, headers=headers, timeout=REQUEST_TIMEOUT)
+    for group in groups:
+        response = requests.get(
+            base_url,
+            params={"dateFrom": group[0], "numberOfDays": len(group)},
+            headers=headers,
+            timeout=REQUEST_TIMEOUT,
+        )
         response.raise_for_status()
         data = response.json()
-
         for day in data.get("days", []):
-            if day.get("date") == date:
+            if day.get("date") in date_set:
                 all_days.append(day)
 
     return {"days": all_days}

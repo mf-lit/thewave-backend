@@ -144,6 +144,7 @@ def send_notification(
     title, body = _build_display_strings(notification, availability)
     logger.info(
         f"Sending FCM message to client {client_id}. "
+        f"Token: {fcm_token}. "
         f"Title: {title!r}, Body: {body!r}, Data: {json.dumps(data_payload)}"
     )
 

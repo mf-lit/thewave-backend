@@ -1,6 +1,6 @@
 """Availability checker for notifications."""
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Tuple
 
 from src.storage.sqlite import SQLiteStorage
@@ -12,6 +12,20 @@ from src.utils.calendar import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Minutes to wait before next check, indexed by days until session (0–15; >15 uses index 15)
+DAYS_TABLE = [3, 3, 3, 5, 5, 5, 5, 10, 10, 15, 20, 30, 60, 90, 120, 240]
+
+# Minutes to wait before next check, indexed by seats available (0–15; >15 uses index 15)
+SEATS_TABLE = [3, 3, 3, 3, 3, 5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240]
+
+
+def compute_next_interval(availability: int, session_datetime: datetime) -> int:
+    """Return how many minutes to wait before the next check."""
+    days = max(0, (session_datetime - datetime.now()).days)
+    days_minutes = DAYS_TABLE[min(days, 15)]
+    seats_minutes = SEATS_TABLE[min(availability, 15)]
+    return min(days_minutes, seats_minutes)
 
 
 def is_session_in_past(notification: Dict) -> bool:
@@ -115,8 +129,18 @@ def process_single_notification(
         logger.warning(f"Could not extract availability for side {side} in performance {performance_ak}")
         return
 
-    # Update last checked availability
-    storage.update_notification(client_id, notification_id, {"last_checked_availability": current_availability})
+    # Compute next check time
+    try:
+        session_dt = datetime.strptime(f"{notification['date']} {notification['time']}", "%Y-%m-%d %H:%M")
+        interval_minutes = compute_next_interval(current_availability, session_dt)
+    except ValueError:
+        interval_minutes = 3
+    next_check_at = (datetime.utcnow() + timedelta(minutes=interval_minutes)).strftime("%Y-%m-%d %H:%M:%S")
+
+    storage.update_notification(client_id, notification_id, {
+        "last_checked_availability": current_availability,
+        "next_check_at": next_check_at,
+    })
 
     # Check and send notification if conditions met
     should_notify, message = check_notification_conditions(notification, current_availability)
