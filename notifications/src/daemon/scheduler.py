@@ -9,7 +9,7 @@ import schedule
 from src.daemon.checker import check_availability
 from src.storage.sqlite import SQLiteStorage
 
-CHECK_INTERVAL_MINUTES = 3
+CHECK_INTERVAL_MINUTES = 1
 SLEEP_INTERVAL_SECONDS = 60
 
 logging.basicConfig(
