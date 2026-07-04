@@ -17,7 +17,7 @@ FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 FORECAST_PARAMS = {
     "latitude": 51.539,
     "longitude": -2.6185,
-    "hourly": "temperature_2m,precipitation_probability,wind_speed_10m,wind_direction_10m,weather_code",
+    "hourly": "temperature_2m,precipitation_probability,wind_speed_10m,wind_gusts_10m,wind_direction_10m,weather_code",
     "wind_speed_unit": "mph",
     "timezone": "Europe/London",
 }
@@ -38,7 +38,7 @@ def fetch_forecast() -> dict[datetime, dict]:
     Returns:
         dict[datetime, dict]: Mapping of naive local datetime (on the hour) to a
         weather object {"temperature", "precipitationProbability", "windSpeed",
-        "weatherCode"}.
+        "windGusts", "weatherCode"}.
     """
     logger.info("Fetching weather forecast from Open-Meteo")
     max_retries = 2
@@ -60,12 +60,13 @@ def fetch_forecast() -> dict[datetime, dict]:
     temperatures = hourly.get("temperature_2m", [])
     precip_probs = hourly.get("precipitation_probability", [])
     wind_speeds = hourly.get("wind_speed_10m", [])
+    wind_gusts = hourly.get("wind_gusts_10m", [])
     wind_directions = hourly.get("wind_direction_10m", [])
     weather_codes = hourly.get("weather_code", [])
 
     forecast_data: dict[datetime, dict] = {}
-    for t, temp, precip, wind, wind_dir, code in zip(times, temperatures, precip_probs, wind_speeds, wind_directions, weather_codes):
-        if None in (t, temp, precip, wind, wind_dir, code):
+    for t, temp, precip, wind, gust, wind_dir, code in zip(times, temperatures, precip_probs, wind_speeds, wind_gusts, wind_directions, weather_codes):
+        if None in (t, temp, precip, wind, gust, wind_dir, code):
             continue
         try:
             dt = datetime.strptime(t, "%Y-%m-%dT%H:%M")
@@ -76,6 +77,7 @@ def fetch_forecast() -> dict[datetime, dict]:
             "temperature": temp,
             "precipitationProbability": precip,
             "windSpeed": wind,
+            "windGusts": gust,
             "windDirection": wind_dir,
             "weatherCode": code,
         }
