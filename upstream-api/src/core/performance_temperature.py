@@ -101,10 +101,16 @@ def _london_naive_to_utc_naive(dt_local: datetime) -> datetime:
 
 
 @lru_cache(maxsize=HISTORICAL_TEMP_CACHE_SIZE)
-def _get_temperature_for_time_cached(target_time_iso: str) -> tuple[float, bool] | None:
+def _closest_reading_for_time_cached(target_time_iso: str) -> tuple[float, str] | None:
     """
-    Get the water temperature for a specific time (cached version).
-    Looks for the closest temperature reading in the database.
+    Find the closest temperature reading to a target time (cached version).
+
+    Only the reading's *immutable* facts are cached: its temperature and its
+    recorded_at. For a past target these never change (no newer row can fall
+    inside the ±2h window, and a reading's temperature is fixed), so caching them
+    is safe. The reading's stuck-sensor ``valid`` flag is deliberately NOT cached
+    here — it is mutated retroactively once a frozen run is detected, so it is
+    resolved live in _get_temperature_for_time.
 
     Args:
         target_time_iso: ISO format string of the target time in UTC (naive),
@@ -112,9 +118,8 @@ def _get_temperature_for_time_cached(target_time_iso: str) -> tuple[float, bool]
             are stored in UTC.
 
     Returns:
-        tuple[float, bool] | None: (temperature, valid) for the closest reading,
-            or None if no reading is found. `valid` is the reading's stuck-sensor
-            flag (False when it belongs to a frozen run).
+        tuple[float, str] | None: (temperature, recorded_at) of the closest
+            reading, or None if no reading is found.
     """
     from src.core.water_temp_db import get_temperature_history
 
@@ -143,13 +148,18 @@ def _get_temperature_for_time_cached(target_time_iso: str) -> tuple[float, bool]
     )
 
     logger.debug(f"Found temperature {closest['temperature']}°C for {target_time_iso}")
-    return closest["temperature"], bool(closest["valid"])
+    return closest["temperature"], closest["recorded_at"]
 
 
 def _get_temperature_for_time(target_time: datetime) -> tuple[float, bool] | None:
     """
     Get the water temperature for a specific time.
-    Results are cached using LRU cache since historical data doesn't change.
+
+    The expensive closest-reading lookup is cached (historical readings don't
+    change), but the reading's ``valid`` flag is read live because it is flipped
+    retroactively when the sensor is found to be stuck — caching it would serve a
+    stale ``valid=True`` for times looked up before a freeze crossed the
+    stuck-sensor threshold.
 
     Args:
         target_time: The time to get temperature for, as a naive Europe/London
@@ -157,12 +167,20 @@ def _get_temperature_for_time(target_time: datetime) -> tuple[float, bool] | Non
 
     Returns:
         tuple[float, bool] | None: (temperature, valid) for the closest reading,
-            or None if no reading is found.
+            or None if no reading is found. `valid` is the reading's current
+            stuck-sensor flag (False when it belongs to a frozen run).
     """
+    from src.core.water_temp_db import is_reading_valid
+
     # DB readings are stored in UTC; convert the London-local performance time
     # before looking up so BST/GMT offsets don't shift the match by an hour.
     target_utc = _london_naive_to_utc_naive(target_time)
-    return _get_temperature_for_time_cached(target_utc.isoformat())
+    closest = _closest_reading_for_time_cached(target_utc.isoformat())
+    if closest is None:
+        return None
+
+    temperature, recorded_at = closest
+    return temperature, is_reading_valid(recorded_at)
 
 
 def _current_forecast_mtime() -> float | None:
@@ -288,18 +306,22 @@ def _get_predicted_temperature(target_time: datetime) -> float | None:
 
 def _get_latest_known_temperature() -> float | None:
     """
-    Last-resort fallback: the most recent actual reading from the water-temp DB.
+    Last-resort fallback: the most recent *valid* reading from the water-temp DB.
 
-    Used to guarantee every performance carries a temperature even when neither
-    the normal forecast nor a near-in-time historical reading is available.
+    Only valid (non-stuck) readings qualify, so a carried-forward estimate is
+    never sourced from a frozen run. The safety net that uses this is additionally
+    gated on the sensor not currently being stuck (see
+    add_temperature_to_performances), so no value is carried forward past the last
+    valid reading while a freeze is in progress.
 
     Returns:
-        float | None: Most recent recorded temperature, or None if the DB is empty.
+        float | None: Most recent valid recorded temperature, or None if there is
+            no valid reading.
     """
-    from src.core.water_temp_db import get_latest_temperature
+    from src.core.water_temp_db import get_latest_valid_temperature
 
     try:
-        latest = get_latest_temperature()
+        latest = get_latest_valid_temperature()
         if latest is not None and latest.get("temperature") is not None:
             return round(float(latest["temperature"]), 1)
     except Exception as e:
@@ -336,29 +358,33 @@ def add_temperature_to_performances(data: dict) -> dict:
     Add water temperature to performances based on their timing.
 
     Rules:
-    - Past performances: Get temperature from database for that time
+    - Past performances: Get temperature from database for that time, but only
+      when the matched reading is valid (not part of a frozen stuck-sensor run).
+      A stuck/invalid reading leaves ``waterTemperature`` unset.
     - Current performances (happening now): Get current temperature via
-      get_water_temperature, AND attach the forecast for the current hour as
-      ``predictedWaterTemp`` when one exists — so an in-progress performance
-      carries both the live reading and the prediction.
+      get_water_temperature, but only when the sensor is not currently stuck.
+      Either way, attach the forecast for the current hour as
+      ``predictedWaterTemp`` when one exists.
     - Future performances: Get predicted temperature from the forecast. Only a
       genuine forecast value for the exact hour is used; when the forecast has
       no value for the hour, ``predictedWaterTemp`` is left unset.
 
+    ``waterTemperature`` is only ever attached from a valid reading: stuck/frozen
+    readings are never surfaced, so nothing is attached after the last valid
+    reading while a freeze is in progress. Whenever ``waterTemperature`` is set,
+    ``waterTempIsValid`` is set alongside it (``true`` for a real reading,
+    ``false`` for a safety-net estimate).
+
     ``predictedWaterTemp`` only ever holds a genuine in-horizon forecast value
     for the exact hour, whether attached to a current or a future performance.
 
-    Whenever ``waterTemperature`` is set, ``waterTempIsValid`` is set alongside
-    it: the stuck-sensor ``valid`` flag of the underlying reading (past), whether
-    the sensor is currently un-stuck (current), or ``false`` for a safety-net
-    estimate. Future slots carry ``predictedWaterTemp`` only and get neither.
-
-    Safety net (past/current only): if such a performance would otherwise carry
-    neither ``waterTemperature`` nor ``predictedWaterTemp`` (stuck sensor, gap in
-    the historical DB), it is backfilled with the most recent known reading and
-    flagged ``waterTempIsEstimate: true`` (and ``waterTempIsValid: false``).
-    Future slots are never backfilled — a missing forecast leaves them bare. The
-    estimate flag is only present when True.
+    Safety net (past/current, sensor not stuck only): if such a performance would
+    otherwise carry neither ``waterTemperature`` nor ``predictedWaterTemp`` (e.g.
+    an isolated gap in the historical DB), it is backfilled with the most recent
+    *valid* reading and flagged ``waterTempIsEstimate: true`` (and
+    ``waterTempIsValid: false``). While the sensor is stuck the safety net is
+    suppressed, so no value is carried forward past the last valid reading. Future
+    slots are never backfilled. The estimate flag is only present when True.
 
     Args:
         data: Calendar response data with days and performances
@@ -376,10 +402,18 @@ def add_temperature_to_performances(data: dict) -> dict:
         now = datetime.now(LONDON_TZ).replace(tzinfo=None)
         days = data.get("days", [])
 
-        # Computed on demand the first time a 'current' performance needs it (the
-        # live reading carries no per-row valid flag), then reused for the rest of
-        # this response. Left None for all-past/all-future calls to avoid the query.
+        # Whether the sensor is currently frozen. Computed on demand the first
+        # time a branch needs it (current reading, or the safety net), then reused
+        # for the rest of this response. Left None — and the query avoided — when
+        # nothing needs it.
         sensor_stuck: bool | None = None
+
+        def is_sensor_stuck() -> bool:
+            nonlocal sensor_stuck
+            if sensor_stuck is None:
+                from src.core.water_temp_db import get_stuck_sensor_status
+                sensor_stuck = bool(get_stuck_sensor_status().get("stuck"))
+            return sensor_stuck
 
         for day in days:
             performances = day.get("performances", [])
@@ -408,14 +442,13 @@ def add_temperature_to_performances(data: dict) -> dict:
                                 logger.error(f"Error getting predicted temperature for future performance: {e}")
 
                     elif status == "current":
-                        # Get current temperature for ongoing performances
+                        # Get current temperature for ongoing performances, but
+                        # only surface it while the sensor is not stuck — a frozen
+                        # reading is never attached (leaves waterTemperature unset).
                         temp = _get_current_temperature()
-                        if temp is not None:
-                            if sensor_stuck is None:
-                                from src.core.water_temp_db import get_stuck_sensor_status
-                                sensor_stuck = bool(get_stuck_sensor_status().get("stuck"))
+                        if temp is not None and not is_sensor_stuck():
                             performance["waterTemperature"] = temp
-                            performance["waterTempIsValid"] = not sensor_stuck
+                            performance["waterTempIsValid"] = True
                             logger.info(
                                 f"Added current temperature {temp}°C to performance "
                                 f"{performance.get('performanceAK', 'unknown')}"
@@ -446,20 +479,31 @@ def add_temperature_to_performances(data: dict) -> dict:
                                 result = _get_temperature_for_time(perf_time)
                                 if result is not None:
                                     temp, is_valid = result
-                                    performance["waterTemperature"] = temp
-                                    performance["waterTempIsValid"] = is_valid
-                                    logger.info(
-                                        f"Added historical temperature {temp}°C (valid={is_valid}) to performance "
-                                        f"{performance.get('performanceAK', 'unknown')}"
-                                    )
+                                    # Only surface a valid reading; a stuck/frozen
+                                    # reading leaves waterTemperature unset.
+                                    if is_valid:
+                                        performance["waterTemperature"] = temp
+                                        performance["waterTempIsValid"] = True
+                                        logger.info(
+                                            f"Added historical temperature {temp}°C to performance "
+                                            f"{performance.get('performanceAK', 'unknown')}"
+                                        )
+                                    else:
+                                        logger.debug(
+                                            f"Skipping stuck/invalid historical reading for performance "
+                                            f"{performance.get('performanceAK', 'unknown')}"
+                                        )
                             except (ValueError, KeyError) as e:
                                 logger.error(f"Error getting temperature for past performance: {e}")
 
-                    # Safety net for past/current performances: guarantee they
-                    # carry a temperature even when the steps above produced
-                    # nothing — a stuck sensor freezing the current reading, a
-                    # gap in the historical DB. Backfill from the most recent
-                    # known reading and flag it.
+                    # Safety net for past/current performances: backfill a
+                    # temperature when the steps above produced nothing — e.g. an
+                    # isolated gap in the historical DB — from the most recent
+                    # valid reading, flagged as an estimate.
+                    #
+                    # Suppressed while the sensor is stuck: carrying the last valid
+                    # reading forward into the freeze would attach waterTemperature
+                    # after the last valid reading, which we deliberately avoid.
                     #
                     # Future slots are deliberately excluded: predictedWaterTemp
                     # must only ever hold a genuine forecast value, so when the
@@ -469,6 +513,7 @@ def add_temperature_to_performances(data: dict) -> dict:
                         status != "future"
                         and performance.get("waterTemperature") is None
                         and performance.get("predictedWaterTemp") is None
+                        and not is_sensor_stuck()
                     ):
                         fallback = _get_latest_known_temperature()
                         if fallback is not None:

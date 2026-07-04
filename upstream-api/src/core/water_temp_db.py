@@ -175,6 +175,66 @@ def get_latest_temperature() -> dict | None:
         return None
 
 
+def get_latest_valid_temperature() -> dict | None:
+    """
+    Get the most recent water temperature reading that is not part of a frozen
+    (stuck-sensor) run — i.e. the newest reading with ``valid = 1``.
+
+    Used as the safety-net fallback so a carried-forward estimate is never sourced
+    from a stuck reading.
+
+    Returns:
+        dict | None: Dictionary with temperature, recorded_at, created_at, valid,
+            or None if there is no valid reading.
+    """
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, temperature, recorded_at, created_at, valid
+            FROM water_temperature
+            WHERE valid = 1
+            ORDER BY recorded_at DESC
+            LIMIT 1
+        """)
+
+        row = cursor.fetchone()
+        if row:
+            return {
+                "id": row["id"],
+                "temperature": row["temperature"],
+                "recorded_at": row["recorded_at"],
+                "created_at": row["created_at"],
+                "valid": bool(row["valid"])
+            }
+        return None
+
+
+def is_reading_valid(recorded_at: str) -> bool:
+    """
+    Return the *current* stuck-sensor validity of the reading stored at
+    ``recorded_at``.
+
+    Read live (uncached) on purpose: the ``valid`` flag is mutated retroactively
+    when a frozen run is detected (see _update_validity_for_new_reading), so a
+    reading that was valid when first looked up can later become invalid. Callers
+    that cache the reading's immutable facts (temperature, recorded_at) must route
+    the mutable flag through here to avoid serving stale validity.
+
+    Args:
+        recorded_at: The exact stored recorded_at string of the reading (unique to
+            microsecond precision).
+
+    Returns:
+        bool: The reading's ``valid`` flag, or False if no such row exists.
+    """
+    with get_db_connection() as conn:
+        row = conn.execute(
+            "SELECT valid FROM water_temperature WHERE recorded_at = ? LIMIT 1",
+            (recorded_at,),
+        ).fetchone()
+        return bool(row["valid"]) if row is not None else False
+
+
 def get_temperature_history(limit: int = 100, start_date: str | None = None, end_date: str | None = None) -> list[dict]:
     """
     Get historical water temperature readings.
