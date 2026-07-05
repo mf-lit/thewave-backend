@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="badges">
+  <div class="badge-group">
+    <div class="group-title">Active clients</div>
+    <div class="group-items">
+      <div class="badge"><span class="badge-value" id="stat-active">–</span><span class="badge-label">(30d, returning)</span></div>
+    </div>
+  </div>
+
+  <div class="badge-group">
+    <div class="group-title">New clients</div>
+    <div class="group-items">
+      <div class="badge"><span class="badge-value" id="stat-new-week">–</span><span class="badge-label">This week</span></div>
+      <div class="badge"><span class="badge-value" id="stat-new-yesterday">–</span><span class="badge-label">Yesterday</span></div>
+      <div class="badge"><span class="badge-value" id="stat-new-today">–</span><span class="badge-label">Today</span></div>
+    </div>
+  </div>
+
+  <div class="badge-group">
+    <div class="group-title">All clients</div>
+    <div class="group-items">
+      <div class="badge"><span class="badge-value" id="stat-all-week">–</span><span class="badge-label">This week</span></div>
+      <div class="badge"><span class="badge-value" id="stat-all-yesterday">–</span><span class="badge-label">Yesterday</span></div>
+      <div class="badge"><span class="badge-value" id="stat-all-today">–</span><span class="badge-label">Today</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="controls">
+  <label>From <input type="date" id="from"></label>
+  <label>To <input type="date" id="to"></label>
+  <label>Granularity
+    <select id="granularity">
+      <option value="hour">Hour</option>
+      <option value="day" selected>Day</option>
+      <option value="week">Week</option>
+      <option value="month">Month</option>
+    </select>
+  </label>
+  <label>Rows
+    <select id="limit">
+      <option value="20">20</option>
+      <option value="40" selected>40</option>
+      <option value="100">100</option>
+      <option value="500">500</option>
+      <option value="0">All</option>
+    </select>
+  </label>
+  <label class="check"><input type="checkbox" id="exclude-cloud" checked> Hide Google/Apple</label>
+  <button id="apply">Apply</button>
+  <button id="reset" class="secondary">Reset</button>
+</section>
+
+<section class="charts">
+  <div class="chart-card">
+    <h2>New clients <span class="sub">by first seen</span></h2>
+    <canvas id="chart-new"></canvas>
+  </div>
+  <div class="chart-card">
+    <h2>Active clients <span class="sub">by last seen</span></h2>
+    <canvas id="chart-active"></canvas>
+    <p class="note">Past days use an end-of-day snapshot (taken just before UTC midnight); today is
+      live. Days before snapshots began fall back to the approximate last-seen count.</p>
+  </div>
+</section>
+
+<section class="table-block">
+  <h2>Clients <span class="sub">(date range filters on last seen)</span></h2>
+  <div class="col-toggles" data-table="clients"></div>
+  <div class="table-scroll"><table id="table-clients"></table></div>
+  <div class="pager">
+    <button class="secondary" data-page="prev">&larr; Prev</button>
+    <span class="pager-status"></span>
+    <button class="secondary" data-page="next">Next &rarr;</button>
+  </div>
+</section>
+
+<section class="table-block">
+  <h2>Notifications</h2>
+  <div class="col-toggles" data-table="notifications"></div>
+  <div class="table-scroll"><table id="table-notifications"></table></div>
+</section>
+{% endblock %}
