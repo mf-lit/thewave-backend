@@ -1,0 +1,21 @@
+/server-setup/thewave/ml /server-setup/thewave
+Traceback (most recent call last):
+  File "/server-setup/thewave/ml/get_current_conditions.py", line 1, in <module>
+    import bs4 as bs
+ModuleNotFoundError: No module named 'bs4'
+/server-setup/thewave/ml /server-setup/thewave/ml
+Traceback (most recent call last):
+  File "/server-setup/thewave/ml/get_current_conditions.py", line 1, in <module>
+    import bs4 as bs
+ModuleNotFoundError: No module named 'bs4'
+/server-setup/thewave/ml /server-setup/thewave/ml
+Traceback (most recent call last):
+  File "/server-setup/thewave/ml/get_current_conditions.py", line 2, in <module>
+    import requests
+ModuleNotFoundError: No module named 'requests'
+/server-setup/thewave/ml /server-setup/thewave/ml
+Traceback (most recent call last):
+  File "/server-setup/thewave/ml/get_current_conditions.py", line 3, in <module>
+    import html5lib
+ModuleNotFoundError: No module named 'html5lib'
+/server-setup/thewave/ml /server-setup/thewave/ml

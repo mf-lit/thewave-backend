@@ -1,0 +1,33 @@
+/home/marc/ml-exploration/src/lake_forecast/models/neural.py:277: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:838.)
+  losses.append(float(loss))
+refreshed: master rows=23660  feature rows=563472
+rolling split  train<2025-12-01  val[2025-12-01..2026-03-01)  test>=2026-03-01  (latest issue 2026-05-30)
+GRU split sizes  train=2374 val=360 test=345 audit=275
+  [gru] epoch=00 train=1.1452 val=0.8572
+  [gru] epoch=01 train=0.7149 val=0.5764
+  [gru] epoch=02 train=0.4667 val=0.2948
+  [gru] epoch=03 train=0.3747 val=0.3133
+  [gru] epoch=04 train=0.3288 val=0.2402
+  [gru] epoch=05 train=0.2963 val=0.2465
+  [gru] epoch=06 train=0.2655 val=0.2375
+  [gru] epoch=07 train=0.2551 val=0.2411
+  [gru] epoch=08 train=0.2413 val=0.2240
+  [gru] epoch=09 train=0.2321 val=0.2278
+  [gru] epoch=10 train=0.2409 val=0.2526
+  [gru] epoch=11 train=0.2276 val=0.2327
+  [gru] epoch=12 train=0.2306 val=0.2238
+  [gru] epoch=13 train=0.2268 val=0.2454
+  [gru] epoch=14 train=0.2289 val=0.2126
+  [gru] epoch=15 train=0.2178 val=0.2350
+  [gru] epoch=16 train=0.2113 val=0.2230
+  [gru] epoch=17 train=0.2102 val=0.2158
+  [gru] epoch=18 train=0.2119 val=0.2533
+  [gru] epoch=19 train=0.2002 val=0.2239
+  [gru] epoch=20 train=0.2092 val=0.2204
+  [gru] early stop @ epoch 20
+  test MAE=0.3660  audit MAE=0.3349
+gate: candidate 0.7009 < incumbent 0.8747 → PROMOTE
+archived previous best → /home/marc/ml-exploration/models/archive/20260606T164659Z
+promoted candidate gru: test=0.3660  audit=0.3349
+retrain decision: PROMOTED new model — candidate 0.7009 < incumbent 0.8747

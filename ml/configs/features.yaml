@@ -1,0 +1,13 @@
+calendar:
+  hour_period: 24
+  doy_period: 365.25
+
+weather_rolling:
+  temperature_2m: [24, 72, 168]   # mean
+  shortwave_radiation: [6, 24, 72]  # sum
+  precipitation: [6, 24, 72]        # sum
+  wind_speed_10m: [24]              # mean
+  cloud_cover: [24]                 # mean
+
+water_anchor:
+  decay_taus_hours: [24, 72, 168]
