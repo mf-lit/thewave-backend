@@ -1,4 +1,5 @@
 import time
+import random
 import logging
 import threading
 from datetime import datetime, timedelta
@@ -24,10 +25,19 @@ FORECAST_PARAMS = {
 
 # Forecast cache: data is dict[datetime, dict] mapping each forecast hour to a
 # camelCase weather object. Refreshed at most once per hour (expires at the
-# start of the next hour, like the water-temperature weather cache).
-_forecast_cache: dict = {"data": {}, "expires": 0.0}
+# start of the next hour, like the water-temperature weather cache), plus a
+# random jitter so we don't refetch at the exact top of the hour alongside
+# every other client of the (free, shared) Open-Meteo API.
+_forecast_cache: dict = {"data": {}, "expires": 0.0, "retry_after": 0.0}
 # Lock to prevent concurrent forecast fetches.
 _forecast_lock = threading.Lock()
+
+# Spread refreshes across the first few minutes of the hour instead of all
+# landing on :00, when Open-Meteo sees load from every other hour-aligned client.
+FORECAST_EXPIRY_JITTER_SECONDS = 180
+# After a failed fetch, wait before retrying instead of hammering Open-Meteo
+# again on every subsequent request (expires isn't bumped forward on failure).
+FORECAST_RETRY_COOLDOWN_SECONDS = 60
 
 
 def fetch_forecast() -> dict[datetime, dict]:
@@ -92,23 +102,27 @@ def get_forecast() -> dict[datetime, dict]:
 
     On fetch failure the last cached data is returned (even if stale) so a
     transient network blip doesn't strip weather from responses; only returns
-    an empty dict if nothing was ever cached.
+    an empty dict if nothing was ever cached. A short cooldown is applied
+    after a failure so repeated requests don't retry Open-Meteo immediately.
 
     Returns:
         dict[datetime, dict]: Mapping of forecast hour to weather object.
     """
-    if time.time() < _forecast_cache["expires"]:
+    now = time.time()
+    if now < _forecast_cache["expires"] or now < _forecast_cache["retry_after"]:
         return _forecast_cache["data"]
 
     with _forecast_lock:
         # Double-check after acquiring the lock.
-        if time.time() < _forecast_cache["expires"]:
+        now = time.time()
+        if now < _forecast_cache["expires"] or now < _forecast_cache["retry_after"]:
             return _forecast_cache["data"]
         try:
             _forecast_cache["data"] = fetch_forecast()
-            _forecast_cache["expires"] = _get_next_hour_timestamp()
+            _forecast_cache["expires"] = _get_next_hour_timestamp() + random.uniform(0, FORECAST_EXPIRY_JITTER_SECONDS)
         except Exception as e:
             logger.error(f"Failed to fetch weather forecast, using cached data: {e}")
+            _forecast_cache["retry_after"] = now + FORECAST_RETRY_COOLDOWN_SECONDS
         return _forecast_cache["data"]
 
 
