@@ -1,0 +1,19 @@
+# Terraform state (contains sensitive data — never commit)
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl.bak
+
+# Variable files with real values / secrets
+terraform.tfvars
+*.auto.tfvars
+
+# Crash logs and plan output
+crash.log
+crash.*.log
+*.tfplan
+
+# Keys / credentials
+*.pem
+*.key
+oci_api_key*
