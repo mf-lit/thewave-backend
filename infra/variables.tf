@@ -69,6 +69,12 @@ variable "boot_volume_gbs" {
   default     = 50
 }
 
+variable "availability_domain" {
+  description = "AD to launch the instance in. Empty = first AD. apply-until-capacity.sh cycles this across all ADs to find free A1 capacity, then pins the winning AD in terraform.tfvars."
+  type        = string
+  default     = ""
+}
+
 variable "ssh_public_key_path" {
   description = "Path to the SSH public key injected into the instance's authorized_keys."
   type        = string

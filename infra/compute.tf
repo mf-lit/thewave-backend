@@ -14,7 +14,7 @@ data "oci_core_images" "ol9" {
 
 resource "oci_core_instance" "main" {
   compartment_id      = oci_identity_compartment.project.id
-  availability_domain = data.oci_identity_availability_domains.ads.availability_domains[0].name
+  availability_domain = var.availability_domain != "" ? var.availability_domain : data.oci_identity_availability_domains.ads.availability_domains[0].name
   display_name        = "${var.project_name}-ampere"
   shape               = "VM.Standard.A1.Flex"
 
