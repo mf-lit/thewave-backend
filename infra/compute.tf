@@ -36,6 +36,7 @@ resource "oci_core_instance" "main" {
 
   metadata = {
     ssh_authorized_keys = file(pathexpand(var.ssh_public_key_path))
+    user_data           = base64encode(file("${path.module}/cloud-init.yaml"))
   }
 
   # Enable the Oracle Cloud Agent Bastion plugin so the managed bastion can

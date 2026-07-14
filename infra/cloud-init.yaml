@@ -1,0 +1,60 @@
+#cloud-config
+# Provisions an Oracle Linux 9 host with the user's preferred package set.
+# Ubuntu/apt names have been mapped to their OL9/dnf equivalents:
+#   docker docker-compose -> Docker CE repo (docker-ce + compose plugin, + shim)
+#   vim                   -> vim-enhanced
+#   curl                  -> swap curl-minimal for full curl (see runcmd)
+#   gnupg-agent           -> gnupg2 (provides gpg-agent)
+#   pv pwgen whois p7zip moreutils -> same names, sourced from EPEL
+# All other names (git, ca-certificates, jq, gcc, make, zip) are identical.
+
+package_update: true
+
+# Extra repos needed for the packages below.
+yum_repos:
+  docker-ce-stable:
+    name: Docker CE Stable - $basearch
+    baseurl: https://download.docker.com/linux/centos/9/$basearch/stable
+    enabled: true
+    gpgcheck: true
+    gpgkey: https://download.docker.com/linux/centos/gpg
+  # Oracle's EPEL mirror (reachable via NAT / the OCI service gateway) for
+  # pv, pwgen, whois, p7zip, moreutils.
+  ol9_developer_EPEL:
+    name: Oracle Linux 9 EPEL ($basearch)
+    baseurl: https://yum.oracle.com/repo/OracleLinux/OL9/developer/EPEL/$basearch/
+    enabled: true
+    gpgcheck: true
+    gpgkey: file:///etc/pki/rpm-gpg/RPM-GPG-KEY-oracle
+
+packages:
+  # Docker (docker-compose is provided by the v2 plugin + a docker-compose shim)
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-compose-plugin
+  # Requested utilities
+  - vim-enhanced
+  - git
+  - ca-certificates
+  - gnupg2
+  - pv
+  - pwgen
+  - whois
+  - jq
+  - p7zip
+  - p7zip-plugins
+  - gcc
+  - make
+  - zip
+  - moreutils
+
+runcmd:
+  # 'curl' full package conflicts with the preinstalled curl-minimal; swap it.
+  - [ sh, -c, "dnf -y --allowerasing install curl || true" ]
+  # Provide the classic `docker-compose` command as a shim over `docker compose`.
+  - [ sh, -c, "printf '#!/bin/sh\\nexec docker compose \"$@\"\\n' > /usr/local/bin/docker-compose && chmod 0755 /usr/local/bin/docker-compose" ]
+  # Enable Docker and let the default 'opc' user run it without sudo.
+  - [ systemctl, enable, --now, docker ]
+  - [ usermod, -aG, docker, opc ]

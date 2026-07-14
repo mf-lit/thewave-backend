@@ -61,11 +61,26 @@ oci bastion session create-managed-ssh \
 # Replace <privateKey> with ~/.ssh/id_ed25519, then run it.
 ```
 
+## First-boot provisioning (cloud-init)
+
+`cloud-init.yaml` (passed as `user_data`) installs the standard package set on first boot. Ubuntu
+names are mapped to OL9/dnf equivalents:
+
+- **Docker CE** (`docker-ce`, CLI, `containerd.io`, buildx + compose plugins) from the Docker CE
+  repo, plus a `docker-compose` shim over `docker compose`. Docker is enabled and `opc` is added to
+  the `docker` group.
+- **EPEL** (Oracle's mirror) is enabled for `pv`, `pwgen`, `whois`, `p7zip`, `moreutils`.
+- `vim-enhanced`, `git`, `ca-certificates`, `gnupg2` (gpg-agent), `jq`, `gcc`, `make`, `zip`.
+- `curl` is swapped in for the preinstalled `curl-minimal`.
+
+Watch it complete on the instance: `cloud-init status --wait` then `sudo cloud-init status --long`.
+
 ## Verify
 
 - On the instance: `curl -sS ifconfig.me` → returns a public IP (NAT egress works).
 - `sudo dnf check-update` → package metadata downloads (Service Gateway / NAT).
 - `terraform output instance_private_ip` is a `10.0.1.x` address; the instance has **no** public IP.
+- `docker run --rm hello-world` as `opc` (no sudo) → Docker installed and group applied.
 
 ## Teardown
 
@@ -83,5 +98,6 @@ terraform destroy
 | `compartment.tf` | Dedicated project compartment |
 | `network.tf` | VCN, NAT + Service gateways, route table, security list, private subnet |
 | `compute.tf` | Ampere A1.Flex instance + OL9 image lookup |
+| `cloud-init.yaml` | First-boot package install (Docker CE + utilities) |
 | `bastion.tf` | OCI Bastion service |
 | `outputs.tf` | IPs, OCIDs, connect hint |
