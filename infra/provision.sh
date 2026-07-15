@@ -55,7 +55,7 @@ PACKAGES=(
   docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
   # Requested utilities
   vim-enhanced git ca-certificates gnupg2 pv pwgen whois jq
-  p7zip p7zip-plugins gcc make zip moreutils
+  p7zip p7zip-plugins gcc make zip moreutils tmux
   # Tailscale mesh VPN (join the tailnet manually with `tailscale up --ssh`)
   tailscale
 )
