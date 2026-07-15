@@ -44,21 +44,26 @@ terraform apply
 
 ## Connect
 
-`terraform output connect_hint` prints the exact commands. In short:
+`terraform output connect_hint` prints the exact commands.
+
+> **Use an ed25519 key.** OCI Bastion rejects RSA keys on modern OpenSSH (the bastion accepts the
+> public key but the signature fails), so generate one for OCI access: `ssh-keygen -t ed25519 -f
+> ~/.ssh/oci_thewave`. Managed-SSH sessions inject this key into the target, so the instance's
+> baked-in key is not involved and no instance change is needed.
 
 ```sh
-# Open a managed-SSH session (valid up to 3h)
-oci bastion session create-managed-ssh \
+# 1) Open a session and capture its OCID (data.id is the session, not the work request)
+SID=$(oci bastion session create-managed-ssh \
   --bastion-id "$(terraform output -raw bastion_id)" \
   --target-resource-id "$(terraform output -raw instance_id)" \
-  --target-os-username opc \
-  --ssh-public-key-file ~/.ssh/id_ed25519.pub \
-  --session-ttl 10800 --wait-for-state SUCCEEDED
+  --target-os-username opc --ssh-public-key-file ~/.ssh/oci_thewave.pub \
+  --session-ttl 10800 --query 'data.id' --raw-output)
 
-# Fetch the session's ready-made ssh command and connect
-#   oci bastion session get --session-id <OCID> \
-#     --query 'data."ssh-metadata".command' --raw-output
-# Replace <privateKey> with ~/.ssh/id_ed25519, then run it.
+# 2) Wait until ACTIVE, then 3) SSH in
+oci bastion session get --session-id "$SID" --query 'data."lifecycle-state"' --raw-output
+ssh -i ~/.ssh/oci_thewave \
+  -o ProxyCommand="ssh -i ~/.ssh/oci_thewave -W %h:%p -p 22 $SID@host.bastion.$(terraform output -raw region).oci.oraclecloud.com" \
+  opc@"$(terraform output -raw instance_private_ip)"
 ```
 
 ## Cost guardrails (`quota.tf`)
@@ -80,19 +85,33 @@ terraform apply -target=oci_limits_quota.guardrails \
                 -target=oci_budget_alert_rule.any_spend
 ```
 
-## First-boot provisioning (cloud-init)
+## Provisioning (`provision.sh` + cloud-init launcher)
 
-`cloud-init.yaml` (passed as `user_data`) installs the standard package set on first boot. Ubuntu
-names are mapped to OL9/dnf equivalents:
+All install/config logic lives in **`provision.sh`** — an idempotent shell script (safe to run any
+number of times). `cloud-init.yaml.tftpl` is just a thin launcher that Terraform renders with the
+script embedded, so cloud-init writes `provision.sh` to `/opt/thewave/` and runs it once on first
+boot. `provision.sh` is the single source of truth; there is only one copy.
 
-- **Docker CE** (`docker-ce`, CLI, `containerd.io`, buildx + compose plugins) from the Docker CE
-  repo, plus a `docker-compose` shim over `docker compose`. Docker is enabled and `opc` is added to
-  the `docker` group.
-- **EPEL** (Oracle's mirror) is enabled for `pv`, `pwgen`, `whois`, `p7zip`, `moreutils`.
+What it installs (Ubuntu/apt names mapped to OL9/dnf):
+
+- **Docker CE** (`docker-ce`, CLI, `containerd.io`, buildx + compose plugins) plus a `docker-compose`
+  shim over `docker compose`. Docker is enabled and `opc` is added to the `docker` group.
+- **EPEL + CodeReady Builder (CRB)** enabled for `pv`, `pwgen`, `whois`, `p7zip`, `moreutils`
+  (`moreutils` needs a CRB dependency — without CRB the whole atomic dnf transaction fails).
 - `vim-enhanced`, `git`, `ca-certificates`, `gnupg2` (gpg-agent), `jq`, `gcc`, `make`, `zip`.
-- `curl` is swapped in for the preinstalled `curl-minimal`.
+- `curl` swapped in for the preinstalled `curl-minimal`.
 
-Watch it complete on the instance: `cloud-init status --wait` then `sudo cloud-init status --long`.
+### Iterating without rebooting/replacing
+
+Edit `provision.sh`, then push it to the running box and re-run it:
+
+```sh
+./push-provision.sh          # opens a bastion session, copies + runs provision.sh
+```
+
+The instance ignores `user_data` changes (`lifecycle.ignore_changes`), so editing the script never
+threatens the live instance or triggers a capacity-lottery replacement — while a genuinely new
+instance still bakes in the current script. Add new steps as idempotent functions in `provision.sh`.
 
 ## Verify
 
@@ -100,6 +119,7 @@ Watch it complete on the instance: `cloud-init status --wait` then `sudo cloud-i
 - `sudo dnf check-update` → package metadata downloads (Service Gateway / NAT).
 - `terraform output instance_private_ip` is a `10.0.1.x` address; the instance has **no** public IP.
 - `docker run --rm hello-world` as `opc` (no sudo) → Docker installed and group applied.
+- Provisioning log on the box: `/var/log/thewave-provision.log`.
 
 ## Teardown
 
@@ -117,7 +137,9 @@ terraform destroy
 | `compartment.tf` | Dedicated project compartment |
 | `network.tf` | VCN, NAT + Service gateways, route table, security list, private subnet |
 | `compute.tf` | Ampere A1.Flex instance + OL9 image lookup |
-| `cloud-init.yaml` | First-boot package install (Docker CE + utilities) |
+| `provision.sh` | Idempotent install/config script (single source of truth) |
+| `cloud-init.yaml.tftpl` | Thin launcher: embeds + runs provision.sh on first boot |
+| `push-provision.sh` | Copies provision.sh to the running box via the bastion and runs it |
 | `bastion.tf` | OCI Bastion service |
 | `quota.tf` | Cost guardrails — Always-Free quota + budget alert |
 | `outputs.tf` | IPs, OCIDs, connect hint |

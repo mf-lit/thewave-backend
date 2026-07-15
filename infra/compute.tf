@@ -36,7 +36,10 @@ resource "oci_core_instance" "main" {
 
   metadata = {
     ssh_authorized_keys = file(pathexpand(var.ssh_public_key_path))
-    user_data           = base64encode(file("${path.module}/cloud-init.yaml"))
+    # cloud-init embeds and runs provision.sh (single source of provisioning).
+    user_data = base64encode(templatefile("${path.module}/cloud-init.yaml.tftpl", {
+      provision_script = file("${path.module}/provision.sh")
+    }))
   }
 
   # Enable the Oracle Cloud Agent Bastion plugin so the managed bastion can
@@ -50,5 +53,13 @@ resource "oci_core_instance" "main" {
       name          = "Bastion"
       desired_state = "ENABLED"
     }
+  }
+
+  # user_data only takes effect at first boot, and changing it would force a
+  # replacement (and a fresh trip through the A1 capacity lottery). Ignore it
+  # so provision.sh can be iterated on the live box via push-provision.sh;
+  # newly-created instances still bake in the current script.
+  lifecycle {
+    ignore_changes = [metadata["user_data"]]
   }
 }

@@ -1,3 +1,8 @@
+output "region" {
+  description = "Region the resources live in (used by push-provision.sh)."
+  value       = var.region
+}
+
 output "compartment_id" {
   description = "OCID of the project compartment."
   value       = oci_identity_compartment.project.id
@@ -24,19 +29,23 @@ output "bastion_id" {
 output "connect_hint" {
   description = "How to open a bastion session and SSH in."
   value       = <<-EOT
-    # 1) Open a managed-SSH session (valid up to 3h):
-    oci bastion session create-managed-ssh \
+    # Use an ed25519 key — OCI Bastion rejects RSA keys on modern OpenSSH.
+    #   ssh-keygen -t ed25519 -f ~/.ssh/oci_thewave   # once
+
+    # 1) Open a managed-SSH session and capture its OCID (session, not work-req):
+    SID=$(oci bastion session create-managed-ssh \
       --bastion-id ${oci_bastion_bastion.main.id} \
       --target-resource-id ${oci_core_instance.main.id} \
       --target-os-username opc \
-      --ssh-public-key-file ${var.ssh_public_key_path} \
-      --session-ttl 10800 --wait-for-state SUCCEEDED
+      --ssh-public-key-file ~/.ssh/oci_thewave.pub \
+      --session-ttl 10800 --query 'data.id' --raw-output)
 
-    # 2) Grab the session's SSH command:
-    #    oci bastion session get --session-id <OCID> \
-    #      --query 'data."ssh-metadata".command' --raw-output
-    #    Replace <privateKey> in it with your private key path, then run it.
-    #    It resolves to:
-    #    ssh -i <private_key> -o ProxyCommand="ssh -i <private_key> -W ${oci_core_instance.main.private_ip}:22 -p 22 <session-ocid>@host.bastion.${var.region}.oci.oraclecloud.com" opc@${oci_core_instance.main.private_ip}
+    # 2) Wait until it reports ACTIVE:
+    oci bastion session get --session-id "$SID" --query 'data."lifecycle-state"' --raw-output
+
+    # 3) SSH in through the bastion:
+    ssh -i ~/.ssh/oci_thewave \
+      -o ProxyCommand="ssh -i ~/.ssh/oci_thewave -W %h:%p -p 22 $SID@host.bastion.${var.region}.oci.oraclecloud.com" \
+      opc@${oci_core_instance.main.private_ip}
   EOT
 }
