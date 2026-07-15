@@ -54,7 +54,7 @@ while true; do
       exit 0
     fi
 
-    echo ">>> not yet (out of capacity in $ad); next attempt in ${INTERVAL}s ..."
+    echo ">>> $(date '+%Y-%m-%d %H:%M:%S') not yet (out of capacity in $ad); next attempt in ${INTERVAL}s ..."
     sleep "$INTERVAL"
   done
 done
