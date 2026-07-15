@@ -24,8 +24,11 @@ resource "oci_limits_quota" "guardrails" {
 
   statements = [
     # Compute: block everything, then allow only free-tier A1 cores (max 4).
+    # Launch checks both the AD-scoped and regional core counts, so set both;
+    # the family-wide `zero` above zeroes every other compute quota.
     "zero compute-core quotas in compartment ${oci_identity_compartment.project.name}",
     "set compute-core quota standard-a1-core-count to 4 in compartment ${oci_identity_compartment.project.name}",
+    "set compute-core quota standard-a1-core-regional-count to 4 in compartment ${oci_identity_compartment.project.name}",
     # Block storage: cap total (boot + volumes) at the free 200 GB.
     "set block-storage quota total-storage-gb to 200 in compartment ${oci_identity_compartment.project.name}",
   ]
