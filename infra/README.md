@@ -61,6 +61,25 @@ oci bastion session create-managed-ssh \
 # Replace <privateKey> with ~/.ssh/id_ed25519, then run it.
 ```
 
+## Cost guardrails (`quota.tf`)
+
+To stay inside Always-Free even on a Pay-As-You-Go account:
+
+- **Compartment quota** — denies *all* compute, then re-allows only free-tier A1
+  (max 4 OCPU) and caps block storage at the free 200 GB. Starting from a
+  family-wide `zero` means paid shapes Oracle adds later stay blocked too.
+- **Budget + alert** — a small monthly budget (`monthly_budget_amount`, default 1)
+  that emails `alert_email` on the first real spend — the catch-all for anything
+  the quota can't cap (notably A1 *memory* overage, load balancers, databases).
+
+These are independent of the instance, so apply them before upgrading to PAYG:
+
+```sh
+terraform apply -target=oci_limits_quota.guardrails \
+                -target=oci_budget_budget.project \
+                -target=oci_budget_alert_rule.any_spend
+```
+
 ## First-boot provisioning (cloud-init)
 
 `cloud-init.yaml` (passed as `user_data`) installs the standard package set on first boot. Ubuntu
@@ -100,4 +119,5 @@ terraform destroy
 | `compute.tf` | Ampere A1.Flex instance + OL9 image lookup |
 | `cloud-init.yaml` | First-boot package install (Docker CE + utilities) |
 | `bastion.tf` | OCI Bastion service |
+| `quota.tf` | Cost guardrails — Always-Free quota + budget alert |
 | `outputs.tf` | IPs, OCIDs, connect hint |

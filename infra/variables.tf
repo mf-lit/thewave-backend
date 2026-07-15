@@ -82,6 +82,22 @@ variable "ssh_public_key_path" {
 }
 
 # ---------------------------------------------------------------------------
+# Cost guardrails
+# ---------------------------------------------------------------------------
+
+variable "alert_email" {
+  description = "Email address that receives budget spend alerts."
+  type        = string
+  default     = "marc@vq5.net"
+}
+
+variable "monthly_budget_amount" {
+  description = "Monthly budget in the account's billing currency (GBP/USD). The alert fires on the first real spend against it."
+  type        = number
+  default     = 1
+}
+
+# ---------------------------------------------------------------------------
 # Networking
 # ---------------------------------------------------------------------------
 
