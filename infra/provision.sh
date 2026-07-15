@@ -41,6 +41,10 @@ enabled=1
 gpgcheck=1
 gpgkey=https://download.docker.com/linux/centos/gpg
 EOF
+
+  # Tailscale (official OL9 repo). config-manager is idempotent — re-adding the
+  # same repo just overwrites the file.
+  dnf config-manager --add-repo https://pkgs.tailscale.com/stable/oracle/9/tailscale.repo
 }
 
 # ---------------------------------------------------------------------------
@@ -52,6 +56,8 @@ PACKAGES=(
   # Requested utilities
   vim-enhanced git ca-certificates gnupg2 pv pwgen whois jq
   p7zip p7zip-plugins gcc make zip moreutils
+  # Tailscale mesh VPN (join the tailnet manually with `tailscale up --ssh`)
+  tailscale
 )
 
 ensure_packages() {
@@ -79,6 +85,36 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# Tailscale daemon. Enabling tailscaled is safe to re-run; it does NOT join
+# the tailnet — that's a manual, interactive step you run once:
+#
+#   sudo tailscale up --ssh
+#
+# and complete the browser login it prints. --ssh lets you reach this box
+# directly over the tailnet instead of via the OCI bastion.
+# ---------------------------------------------------------------------------
+ensure_tailscale() {
+  systemctl enable --now tailscaled
+}
+
+# ---------------------------------------------------------------------------
+# Claude Code CLI, installed for the login user (opc) via the official native
+# installer (self-contained binary, no Node needed). Idempotent: skip if it's
+# already present — the binary self-updates, so re-running only reinstalls.
+# The installer drops it in ~opc/.local/bin and adds that to opc's shell PATH.
+# ---------------------------------------------------------------------------
+ensure_claude() {
+  # Make ~/.local/bin reachable on login (the installer warns but won't edit an
+  # existing .bashrc). grep-guard keeps it to a single line across re-runs.
+  local rc=/home/opc/.bashrc
+  sudo -u opc grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$rc" 2>/dev/null \
+    || echo 'export PATH="$HOME/.local/bin:$PATH"' | sudo -u opc tee -a "$rc" >/dev/null
+
+  sudo -u opc test -x /home/opc/.local/bin/claude && return 0
+  sudo -u opc bash -c 'curl -fsSL https://claude.ai/install.sh | bash'
+}
+
+# ---------------------------------------------------------------------------
 # Add new install/config steps below as idempotent functions, then call them
 # from main(). Keep each one safe to re-run.
 # ---------------------------------------------------------------------------
@@ -88,6 +124,8 @@ main() {
   ensure_packages
   ensure_docker
   ensure_compose_shim
+  ensure_tailscale
+  ensure_claude
   echo "=== provision.sh complete $(date -u +%FT%TZ) ==="
 }
 

@@ -36,7 +36,8 @@ terraform apply -target=oci_limits_quota.guardrails \
                 -target=oci_budget_budget.project -target=oci_budget_alert_rule.any_spend
 
 ./apply-until-capacity.sh             # retry apply across all ADs until A1 capacity is free (tmux)
-./push-provision.sh                   # iterate provisioning on the LIVE box (see below)
+./push-provision.sh                   # iterate provisioning on the LIVE box (Tailscale, else bastion)
+./push-provision.sh --fresh           # same, but force a brand-new bastion session
 terraform output connect_hint         # how to SSH in via the bastion
 ```
 
@@ -57,6 +58,12 @@ Terraform renders via `templatefile()` with the script embedded; cloud-init writ
   **`./push-provision.sh`**, not `terraform apply`. New instances still bake in the current script.
 - Extend provisioning by adding **idempotent** functions to `provision.sh` and calling them from
   `main()`. Keep every step safe to run N times.
+- **`push-provision.sh` prefers Tailscale, falls back to the bastion.** It first tries a direct
+  Tailscale SSH to host `thewave-ampere` (MagicDNS name if it resolves, else `tailscale ip -4
+  thewave-ampere`), gated by a `BatchMode` SSH probe. If Tailscale is down, the box isn't a
+  reachable peer, or the probe fails, it drops to the OCI bastion path. Both transports share a
+  `retry`/backoff wrapper around the copy + run. **This needs `tailscale up --ssh` on the box (a
+  manual step — see below) and the caller on the same tailnet**; until then it always uses the bastion.
 
 **Changing `user_data` is the only ignored metadata — other instance changes still force
 replacement.** Editing `ssh_authorized_keys`, shape, image, subnet, `availability_domain`, etc.
@@ -67,15 +74,24 @@ replaces the instance, which throws you back into the A1 capacity lottery. Avoid
 - **OCI Bastion rejects RSA SSH keys** on modern OpenSSH: it accepts the public key then fails the
   signature ("Permission denied (publickey)" after "Server accepts key"). **Use an ed25519 key.**
   Managed-SSH sessions inject the session key into the target, so the instance's baked-in key is
-  irrelevant to connectivity. `push-provision.sh` generates an ephemeral ed25519 key per run.
+  irrelevant to connectivity. `push-provision.sh` uses an ed25519 key.
 - **Bastion session id:** `oci bastion session create-managed-ssh --wait-for-state SUCCEEDED`
   returns the *work-request* OCID, not the session. Instead capture `data.id` (the session OCID)
   and poll `data."lifecycle-state"` until `ACTIVE`.
+- **Fresh bastion sessions race key injection:** the session flips to `ACTIVE` a few seconds before
+  the bastion finishes injecting the key, so the *first* connect often fails with "Permission
+  denied (publickey)". `push-provision.sh` mitigates this two ways — it caches the session (key +
+  OCID) in `.push-session/` (gitignored) and reuses it while `ACTIVE` with >180s TTL left, and it
+  wraps the copy/run in a `retry` with backoff. A single run rides through the warmup race.
 - **`moreutils` needs the CodeReady Builder repo** (`ol9_codeready_builder`) for `perl(IPC::Run)`.
   Because dnf installs atomically, one unresolved dep fails the whole transaction (this silently
   broke the original cloud-init and left docker uninstalled). `provision.sh` enables EPEL **+ CRB**.
 - **A1 "Out of host capacity"** on apply is a capacity issue, not a config bug. London has 3 ADs;
   `apply-until-capacity.sh` cycles all of them. Pay-As-You-Go removes the capacity deprioritization.
+- **Tailscale and Claude Code are installed but need a one-time interactive auth** that can't live
+  in `provision.sh`. On the box as `opc`: `sudo tailscale up --ssh` (join the tailnet + enable
+  direct SSH, completing the printed login), and `claude` (first-run login). `provision.sh` only
+  installs the packages / enables `tailscaled`.
 
 ## Cost guardrails (`quota.tf`)
 
