@@ -1,0 +1,60 @@
+[project]
+name = "lake-forecast"
+version = "0.1.0"
+description = "Hourly water temperature forecasting for a small Bristol lake (168-hour horizon)."
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "pyarrow>=15",
+    "scikit-learn>=1.4",
+    "lightgbm>=4.3",
+    "torch>=2.2",
+    "optuna>=3.6",
+    "httpx>=0.27",
+    "tenacity>=8.2",
+    "diskcache>=5.6",
+    "pydantic>=2.6",
+    "typer>=0.12",
+    "matplotlib>=3.8",
+    "joblib>=1.3",
+    "pyyaml>=6.0",
+    "tzdata>=2024.1",
+    "bs4>=0.0.2",
+    "requests>=2.34.2",
+    "html5lib>=1.1",
+]
+
+[project.scripts]
+forecast-lake = "lake_forecast.cli:forecast_app"
+train-lake = "lake_forecast.cli:train_app"
+eval-lake = "lake_forecast.cli:eval_app"
+retrain-lake = "lake_forecast.cli:retrain_app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.4",
+    "mypy>=1.9",
+    "ipykernel>=6.29",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lake_forecast"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

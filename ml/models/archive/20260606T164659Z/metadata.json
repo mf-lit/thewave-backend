@@ -1,0 +1,9 @@
+{
+  "model": "gru",
+  "selection_rule": "lowest test+audit MAE among trained candidates",
+  "test_mae": 0.35044706680523,
+  "audit_mae": 0.391356077836229,
+  "test_skill_vs_persistence": 0.6692525016043175,
+  "audit_skill_vs_persistence": 0.6918275933639723,
+  "trained_at": "2026-05-19T20:25:37.350909+00:00"
+}

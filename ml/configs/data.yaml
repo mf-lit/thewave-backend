@@ -1,0 +1,43 @@
+site:
+  name: bristol_lake
+  latitude: 51.5394
+  longitude: -2.6185
+  timezone_local: Europe/London
+
+paths:
+  raw_csv: data/hourly.csv
+  cleaned_parquet: data/interim/cleaned.parquet
+  weather_cache_dir: data/external/openmeteo
+  weather_joined_parquet: data/interim/weather_joined.parquet
+  feature_matrix_parquet: data/processed/feature_matrix.parquet
+
+openmeteo:
+  archive_endpoint: https://archive-api.open-meteo.com/v1/archive
+  forecast_endpoint: https://api.open-meteo.com/v1/forecast
+  timezone: UTC
+  variables:
+    - temperature_2m
+    - relative_humidity_2m
+    - dew_point_2m
+    - precipitation
+    - cloud_cover
+    - shortwave_radiation
+    - direct_radiation
+    - diffuse_radiation
+    - wind_speed_10m
+    - wind_direction_10m
+    - surface_pressure
+  bucket_days: 90
+  retry:
+    attempts: 6
+    base_seconds: 1.5
+    max_seconds: 30
+
+date_range:
+  history_start: "2023-09-24"
+  history_end: "2026-05-19"
+
+cleaning:
+  stuck_run_min_length: 6
+  water_temp_clip: [0.0, 30.0]
+  weather_ffill_limit: 3

@@ -1,0 +1,42 @@
+splits:
+  test_start: "2026-02-19"   # final 90-day chronological test window
+  val_start:  "2025-11-21"   # 90-day val just before test
+  summer_audit_start: "2024-06-01"
+  summer_audit_end:   "2024-08-31"
+  cv_folds: 4
+  cv_fold_days: 30
+
+forecast:
+  horizon_hours: 168
+  issue_stride_hours: 6
+
+retrain:
+  # Rolling split for the periodic retrain (boundaries roll back from the latest
+  # observation each run). Frozen `splits:` above stay as the report's baseline.
+  test_days: 90
+  val_days: 90
+
+daytime_mask:
+  local_tz: Europe/London
+  hour_start: 6
+  hour_end_exclusive: 22  # 6..21 inclusive
+
+models:
+  lightgbm:
+    optuna_trials: 80
+    timeout_seconds: 2400
+    early_stopping_rounds: 200
+    base_n_estimators: 4000
+  gru:
+    history_hours: 72
+    hidden: 64
+    num_layers: 1
+    dropout: 0.2
+    lr: 1e-3
+    batch_size: 64
+    max_epochs: 50
+    patience: 6
+  ridge:
+    alphas: [0.1, 1.0, 10.0, 100.0, 1000.0]
+
+seed: 42
