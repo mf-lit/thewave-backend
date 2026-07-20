@@ -1,0 +1,12 @@
+[project]
+name = "thewave-dashboard"
+version = "0.1.0"
+description = "Web dashboard for The Wave client usage and notifications"
+requires-python = ">=3.12"
+dependencies = [
+    "flask>=3.0",
+    "flask-cors>=4.0",
+]
+
+[tool.uv]
+package = false
