@@ -1,0 +1,21 @@
+[project]
+name = "price-scraper"
+version = "0.1.0"
+description = "Scrape ticket prices from The Wave's ticketing site"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "playwright>=1.60.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[project.scripts]
+price-scraper = "price_scraper.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
