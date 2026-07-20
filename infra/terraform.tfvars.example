@@ -1,0 +1,21 @@
+# Copy to terraform.tfvars and fill in. terraform.tfvars is gitignored.
+
+# Your tenancy's home region (see ~/.oci/config or the OCI Console top-right).
+region       = "uk-london-1"
+tenancy_ocid = "ocid1.tenancy.oc1..xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# Profile in ~/.oci/config (default is fine for a single-tenancy setup).
+oci_profile = "DEFAULT"
+
+# Public key injected into the instance. Its private counterpart also
+# authenticates the bastion session.
+ssh_public_key_path = "~/.ssh/id_ed25519.pub"
+
+# --- Optional overrides (defaults shown) ---
+# project_name        = "thewave"
+# instance_ocpus      = 2
+# instance_memory_gbs = 8
+# boot_volume_gbs     = 50
+# vcn_cidr            = "10.0.0.0/16"
+# subnet_cidr         = "10.0.1.0/24"
+# bastion_client_cidr = ["0.0.0.0/0"]

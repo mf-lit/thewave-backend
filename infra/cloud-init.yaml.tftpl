@@ -1,0 +1,14 @@
+#cloud-config
+# Thin launcher: embed the idempotent provision.sh and run it once on first
+# boot. ALL install/config logic lives in provision.sh (single source of
+# truth); this file only delivers and runs it. Rendered by Terraform via
+# templatefile() so there's exactly one copy of the script (provision.sh).
+write_files:
+  - path: /opt/thewave/provision.sh
+    permissions: '0755'
+    owner: root:root
+    encoding: b64
+    content: ${base64encode(provision_script)}
+
+runcmd:
+  - [ /opt/thewave/provision.sh ]
