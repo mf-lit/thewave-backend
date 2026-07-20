@@ -13,6 +13,15 @@ wheels/
 config/config.yaml
 config.yaml
 config.json
+.env
 
 # Data files (history is generated, test data may be sensitive)
 data/history/
+
+# Runtime databases; the live copies are bind-mounted into the container
+data/*.db
+*.log
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/

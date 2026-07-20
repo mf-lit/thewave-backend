@@ -111,6 +111,14 @@ def get_calendar(date_from: str, number_of_days: str) -> dict:
                 response = session.get(url, params=params)
 
             logger.info(f"Upstream API response: status_code={response.status_code}, dateFrom={date_from}, numberOfDays={number_of_days}")
+
+            # Retry transient upstream 5xx errors (ticketing-api.thewave.com is flaky)
+            if response.status_code >= 500 and attempt < max_retries:
+                wait = 2 * (attempt + 1)  # 2s, 4s
+                logger.warning(f"Upstream API returned {response.status_code} (attempt {attempt + 1}/{max_retries + 1}), retrying in {wait}s")
+                time.sleep(wait)
+                continue
+
             response.raise_for_status()
             return response.json()
 
