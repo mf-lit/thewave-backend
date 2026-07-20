@@ -12,3 +12,12 @@ venv/
 
 # Environment / secrets
 .env
+
+# Generated pipeline artifacts — regenerable on-demand (see README quickstart).
+# Kept for on-demand forecasting: models/best/, data/hourly.csv, archive_*.parquet.
+/forecast/                                    # forecast outputs (incl. latest.csv)
+/logs/
+/data/interim/                                # training feature intermediates
+/data/processed/
+/data/external/openmeteo/forecast_*.parquet   # 1h-TTL weather cache, re-fetched live
+/models/state.json                            # runtime anchor; rebuilt via --update-state
