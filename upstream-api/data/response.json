@@ -1,0 +1,848 @@
+{
+  "days": [
+    {
+      "availability": null,
+      "date": "2026-02-21",
+      "hasNoTimeSlot": null,
+      "performances": [
+        {
+          "availability": {
+            "available": 33,
+            "generalAdmission": false,
+            "level": "HIGH",
+            "total": 34
+          },
+          "availabilityPerProduct": [
+            {
+              "availability": {
+                "available": 0,
+                "generalAdmission": false,
+                "level": null,
+                "total": 17
+              },
+              "code": "EXP-T-SURF-L",
+              "side": "left"
+            },
+            {
+              "availability": {
+                "available": 4,
+                "generalAdmission": false,
+                "level": null,
+                "total": 17
+              },
+              "code": "EXP-T-SURF-R",
+              "side": "right"
+            }
+          ],
+          "date": "2026-02-21",
+          "eventAk": "TWB.EVN10",
+          "fields": {
+            "description": null,
+            "image": null,
+            "imageSmall": "/api/twb-prod/b2c/v1/images/cached/5hpyY3InvBBCwRgqL2M6Ew==",
+            "place": null,
+            "price": "BLANK",
+            "priceCurrency": "GBP",
+            "priceLabel": "",
+            "seatAssignmentType": null,
+            "seatMapId": null,
+            "tagline": null,
+            "title": "Expert Turns Surf"
+          },
+          "hasSection": true,
+          "isFullDay": false,
+          "isPast": false,
+          "performanceAK": "TWB.EVN10.PRF1500",
+          "priceMax": 43.0,
+          "priceMin": 0.0,
+          "secondaryPerformanceAk": null,
+          "time": "10:00:00.000",
+          "timeEnd": "10:59:00.000"
+        },
+        {
+          "availability": {
+            "available": 5,
+            "generalAdmission": false,
+            "level": "HIGH",
+            "total": 5
+          },
+          "availabilityPerProduct": [
+            {
+              "availability": {
+                "available": 0,
+                "generalAdmission": false,
+                "level": null,
+                "total": 0
+              },
+              "code": "HPC-ADVP-L",
+              "side": "left"
+            },
+            {
+              "availability": {
+                "available": 5,
+                "generalAdmission": false,
+                "level": null,
+                "total": 5
+              },
+              "code": "HPC-ADVP-R",
+              "side": "right"
+            }
+          ],
+          "date": "2026-02-21",
+          "eventAk": "TWB.EVN51",
+          "fields": {
+            "description": null,
+            "image": null,
+            "imageSmall": "/api/twb-prod/b2c/v1/images/cached/nQgU_yBZPy3rY6z1bOGxhQ==",
+            "place": null,
+            "price": "BLANK",
+            "priceCurrency": "GBP",
+            "priceLabel": "",
+            "seatAssignmentType": null,
+            "seatMapId": null,
+            "tagline": null,
+            "title": "High Performance Coaching (ADV+)"
+          },
+          "hasSection": true,
+          "isFullDay": false,
+          "isPast": false,
+          "performanceAK": "TWB.EVN51.PRF114",
+          "priceMax": 51.0,
+          "priceMin": 0.0,
+          "secondaryPerformanceAk": null,
+          "time": "10:30:00.000",
+          "timeEnd": "10:59:00.000"
+        },
+        {
+          "availability": {
+            "available": 26,
+            "generalAdmission": false,
+            "level": "HIGH",
+            "total": 29
+          },
+          "availabilityPerProduct": [
+            {
+              "availability": {
+                "available": 14,
+                "generalAdmission": false,
+                "level": null,
+                "total": 17
+              },
+              "code": "AP-SURF-L",
+              "side": "left"
+            },
+            {
+              "availability": {
+                "available": 4,
+                "generalAdmission": false,
+                "level": null,
+                "total": 12
+              },
+              "code": "AP-SURF-R",
+              "side": "right"
+            }
+          ],
+          "date": "2026-02-21",
+          "eventAk": "TWB.EVN8",
+          "fields": {
+            "description": null,
+            "image": null,
+            "imageSmall": "/api/twb-prod/b2c/v1/images/cached/RCHu07KcBX7r46LAu3xM1w==",
+            "place": null,
+            "price": "BLANK",
+            "priceCurrency": "GBP",
+            "priceLabel": "",
+            "seatAssignmentType": null,
+            "seatMapId": null,
+            "tagline": null,
+            "title": "Advanced Plus Surf"
+          },
+          "hasSection": true,
+          "isFullDay": false,
+          "isPast": false,
+          "performanceAK": "TWB.EVN8.PRF2438",
+          "priceMax": 43.0,
+          "priceMin": 0.0,
+          "secondaryPerformanceAk": null,
+          "time": "11:00:00.000",
+          "timeEnd": "11:59:00.000"
+        },
+        {
+          "availability": {
+            "available": 15,
+            "generalAdmission": false,
+            "level": "MEDIUM",
+            "total": 40
+          },
+          "availabilityPerProduct": [
+            {
+              "availability": {
+                "available": 12,
+                "generalAdmission": false,
+                "level": null,
+                "total": 40
+              },
+              "code": "BEG-LESSON",
+              "side": "none"
+            }
+          ],
+          "date": "2026-02-21",
+          "eventAk": "TWB.EVN3",
+          "fields": {
+            "description": null,
+            "image": null,
+            "imageSmall": "/api/twb-prod/b2c/v1/images/cached/PqafTuEZ9diGS5BtmwzHug==",
+            "place": null,
+            "price": "BLANK",
+            "priceCurrency": "GBP",
+            "priceLabel": "",
+            "seatAssignmentType": null,
+            "seatMapId": null,
+            "tagline": null,
+            "title": "Beginner Lesson"
+          },
+          "hasSection": false,
+          "isFullDay": false,
+          "isPast": false,
+          "performanceAK": "TWB.EVN3.PRF10815",
+          "priceMax": 38.0,
+          "priceMin": 0.0,
+          "secondaryPerformanceAk": null,
+          "time": "11:30:00.000",
+          "timeEnd": "12:29:00.000"
+        },
+        {
+          "availability": {
+            "available": 5,
+            "generalAdmission": false,
+            "level": "HIGH",
+            "total": 5
+          },
+          "availabilityPerProduct": [
+            {
+              "availability": {
+                "available": 4,
+                "generalAdmission": false,
+                "level": null,
+                "total": 5
+              },
+              "code": "ADV-COACH-L",
+              "side": "left"
+            },
+            {
+              "availability": {
+                "available": 0,
+                "generalAdmission": false,
+                "level": null,
+                "total": 0
+              },
+              "code": "ADV-COACH-R",
+              "side": "right"
+            }
+          ],
+          "date": "2026-02-21",
+          "eventAk": "TWB.EVN35",
+          "fields": {
+            "description": null,
+            "image": null,
+            "imageSmall": "/api/twb-prod/b2c/v1/images/cached/D-17YDjYcwrNM8Urb9UDEQ==",
+            "place": null,
+            "price": "BLANK",
+            "priceCurrency": "GBP",
+            "priceLabel": "",
+            "seatAssignmentType": null,
+            "seatMapId": null,
+            "tagline": null,
+            "title": "Advanced Coaching (In Water)"
+          },
+          "hasSection": true,
+          "isFullDay": false,
+          "isPast": false,
+          "performanceAK": "TWB.EVN35.PRF1303",
+          "priceMax": 51.0,
+          "priceMin": 0.0,
+          "secondaryPerformanceAk": null,
+          "time": "11:30:00.000",
+          "timeEnd": "11:59:00.000"
+        },
+        {
+          "availability": {
+            "available": 30,
+            "generalAdmission": false,
+            "level": "HIGH",
+            "total": 31
+          },
+          "availabilityPerProduct": [
+            {
+              "availability": {
+                "available": 11,
+                "generalAdmission": false,
+                "level": null,
+                "total": 13
+              },
+              "code": "ADV-SURF-L",
+              "side": "left"
+            },
+            {
+              "availability": {
+                "available": 17,
+                "generalAdmission": false,
+                "level": null,
+                "total": 18
+              },
+              "code": "ADV-SURF-R",
+              "side": "right"
+            }
+          ],
+          "date": "2026-02-21",
+          "eventAk": "TWB.EVN6",
+          "fields": {
+            "description": null,
+            "image": null,
+            "imageSmall": "/api/twb-prod/b2c/v1/images/cached/tsTFQcbuRAzL2KfHRfIZCQ==",
+            "place": null,
+            "price": "BLANK",
+            "priceCurrency": "GBP",
+            "priceLabel": "",
+            "seatAssignmentType": null,
+            "seatMapId": null,
+            "tagline": null,
+            "title": "Advanced Surf"
+          },
+          "hasSection": true,
+          "isFullDay": false,
+          "isPast": false,
+          "performanceAK": "TWB.EVN6.PRF8498",
+          "priceMax": 43.0,
+          "priceMin": 0.0,
+          "secondaryPerformanceAk": null,
+          "time": "12:00:00.000",
+          "timeEnd": "12:59:00.000"
+        },
+        {
+          "availability": {
+            "available": 5,
+            "generalAdmission": false,
+            "level": "MEDIUM",
+            "total": 10
+          },
+          "availabilityPerProduct": [
+            {
+              "availability": {
+                "available": 2,
+                "generalAdmission": false,
+                "level": null,
+                "total": 5
+              },
+              "code": "INT-LESSON-L",
+              "side": "left"
+            },
+            {
+              "availability": {
+                "available": 3,
+                "generalAdmission": false,
+                "level": null,
+                "total": 5
+              },
+              "code": "INT-LESSON-R",
+              "side": "right"
+            }
+          ],
+          "date": "2026-02-21",
+          "eventAk": "TWB.EVN4",
+          "fields": {
+            "description": null,
+            "image": null,
+            "imageSmall": "/api/twb-prod/b2c/v1/images/cached/8F7OWKfZYWTj2AtLrgWc0w==",
+            "place": null,
+            "price": "BLANK",
+            "priceCurrency": "GBP",
+            "priceLabel": "",
+            "seatAssignmentType": null,
+            "seatMapId": null,
+            "tagline": null,
+            "title": "Intermediate Surf Lesson"
+          },
+          "hasSection": true,
+          "isFullDay": false,
+          "isPast": false,
+          "performanceAK": "TWB.EVN4.PRF6697",
+          "priceMax": 47.0,
+          "priceMin": 0.0,
+          "secondaryPerformanceAk": null,
+          "time": "12:30:00.000",
+          "timeEnd": "13:29:00.000"
+        },
+        {
+          "availability": {
+            "available": 10,
+            "generalAdmission": false,
+            "level": "HIGH",
+            "total": 16
+          },
+          "availabilityPerProduct": [
+            {
+              "availability": {
+                "available": 8,
+                "generalAdmission": false,
+                "level": null,
+                "total": 16
+              },
+              "code": "BEG-SURF",
+              "side": "none"
+            }
+          ],
+          "date": "2026-02-21",
+          "eventAk": "TWB.EVN13",
+          "fields": {
+            "description": null,
+            "image": null,
+            "imageSmall": "/api/twb-prod/b2c/v1/images/cached/2PfAaHS7XNKWPqtbMY6UAg==",
+            "place": null,
+            "price": "BLANK",
+            "priceCurrency": "GBP",
+            "priceLabel": "",
+            "seatAssignmentType": null,
+            "seatMapId": null,
+            "tagline": null,
+            "title": "Beginner Surf"
+          },
+          "hasSection": false,
+          "isFullDay": false,
+          "isPast": false,
+          "performanceAK": "TWB.EVN13.PRF2284",
+          "priceMax": 34.0,
+          "priceMin": 0.0,
+          "secondaryPerformanceAk": null,
+          "time": "13:00:00.000",
+          "timeEnd": "13:59:00.000"
+        },
+        {
+          "availability": {
+            "available": 22,
+            "generalAdmission": false,
+            "level": "HIGH",
+            "total": 30
+          },
+          "availabilityPerProduct": [
+            {
+              "availability": {
+                "available": 14,
+                "generalAdmission": false,
+                "level": null,
+                "total": 15
+              },
+              "code": "INT-SURF-L",
+              "side": "left"
+            },
+            {
+              "availability": {
+                "available": 5,
+                "generalAdmission": false,
+                "level": null,
+                "total": 15
+              },
+              "code": "INT-SURF-R",
+              "side": "right"
+            }
+          ],
+          "date": "2026-02-21",
+          "eventAk": "TWB.EVN5",
+          "fields": {
+            "description": null,
+            "image": null,
+            "imageSmall": "/api/twb-prod/b2c/v1/images/cached/B-Um3Chq9ERoLhFweCRxtw==",
+            "place": null,
+            "price": "BLANK",
+            "priceCurrency": "GBP",
+            "priceLabel": "",
+            "seatAssignmentType": null,
+            "seatMapId": null,
+            "tagline": null,
+            "title": "Intermediate Surf"
+          },
+          "hasSection": true,
+          "isFullDay": false,
+          "isPast": false,
+          "performanceAK": "TWB.EVN5.PRF7756",
+          "priceMax": 43.0,
+          "priceMin": 0.0,
+          "secondaryPerformanceAk": null,
+          "time": "13:00:00.000",
+          "timeEnd": "13:59:00.000"
+        },
+        {
+          "availability": {
+            "available": 9,
+            "generalAdmission": false,
+            "level": "MEDIUM",
+            "total": 16
+          },
+          "availabilityPerProduct": [
+            {
+              "availability": {
+                "available": 7,
+                "generalAdmission": false,
+                "level": null,
+                "total": 16
+              },
+              "code": "BEG-LESSON",
+              "side": "none"
+            }
+          ],
+          "date": "2026-02-21",
+          "eventAk": "TWB.EVN3",
+          "fields": {
+            "description": null,
+            "image": null,
+            "imageSmall": "/api/twb-prod/b2c/v1/images/cached/PqafTuEZ9diGS5BtmwzHug==",
+            "place": null,
+            "price": "BLANK",
+            "priceCurrency": "GBP",
+            "priceLabel": "",
+            "seatAssignmentType": null,
+            "seatMapId": null,
+            "tagline": null,
+            "title": "Beginner Lesson"
+          },
+          "hasSection": false,
+          "isFullDay": false,
+          "isPast": false,
+          "performanceAK": "TWB.EVN3.PRF10816",
+          "priceMax": 38.0,
+          "priceMin": 0.0,
+          "secondaryPerformanceAk": null,
+          "time": "13:30:00.000",
+          "timeEnd": "14:29:00.000"
+        },
+        {
+          "availability": {
+            "available": 5,
+            "generalAdmission": false,
+            "level": "HIGH",
+            "total": 5
+          },
+          "availabilityPerProduct": [
+            {
+              "availability": {
+                "available": 4,
+                "generalAdmission": false,
+                "level": null,
+                "total": 5
+              },
+              "code": "ADV-COACH-R",
+              "side": "right"
+            },
+            {
+              "availability": {
+                "available": 1,
+                "generalAdmission": false,
+                "level": null,
+                "total": 0
+              },
+              "code": "ADV-C-R-OLD",
+              "side": "none"
+            }
+          ],
+          "date": "2026-02-21",
+          "eventAk": "TWB.EVN35",
+          "fields": {
+            "description": null,
+            "image": null,
+            "imageSmall": "/api/twb-prod/b2c/v1/images/cached/D-17YDjYcwrNM8Urb9UDEQ==",
+            "place": null,
+            "price": "BLANK",
+            "priceCurrency": "GBP",
+            "priceLabel": "",
+            "seatAssignmentType": null,
+            "seatMapId": null,
+            "tagline": null,
+            "title": "Advanced Coaching (In Water)"
+          },
+          "hasSection": true,
+          "isFullDay": false,
+          "isPast": false,
+          "performanceAK": "TWB.EVN35.PRF1311",
+          "priceMax": 51.0,
+          "priceMin": 0.0,
+          "secondaryPerformanceAk": null,
+          "time": "13:30:00.000",
+          "timeEnd": "13:59:00.000"
+        },
+        {
+          "availability": {
+            "available": 29,
+            "generalAdmission": false,
+            "level": "HIGH",
+            "total": 31
+          },
+          "availabilityPerProduct": [
+            {
+              "availability": {
+                "available": 14,
+                "generalAdmission": false,
+                "level": null,
+                "total": 18
+              },
+              "code": "ADV-SURF-L",
+              "side": "left"
+            },
+            {
+              "availability": {
+                "available": 9,
+                "generalAdmission": false,
+                "level": null,
+                "total": 13
+              },
+              "code": "ADV-SURF-R",
+              "side": "right"
+            }
+          ],
+          "date": "2026-02-21",
+          "eventAk": "TWB.EVN6",
+          "fields": {
+            "description": null,
+            "image": null,
+            "imageSmall": "/api/twb-prod/b2c/v1/images/cached/tsTFQcbuRAzL2KfHRfIZCQ==",
+            "place": null,
+            "price": "BLANK",
+            "priceCurrency": "GBP",
+            "priceLabel": "",
+            "seatAssignmentType": null,
+            "seatMapId": null,
+            "tagline": null,
+            "title": "Advanced Surf"
+          },
+          "hasSection": true,
+          "isFullDay": false,
+          "isPast": false,
+          "performanceAK": "TWB.EVN6.PRF8506",
+          "priceMax": 43.0,
+          "priceMin": 0.0,
+          "secondaryPerformanceAk": null,
+          "time": "14:00:00.000",
+          "timeEnd": "14:59:00.000"
+        },
+        {
+          "availability": {
+            "available": 11,
+            "generalAdmission": false,
+            "level": "MEDIUM",
+            "total": 20
+          },
+          "availabilityPerProduct": [
+            {
+              "availability": {
+                "available": 0,
+                "generalAdmission": false,
+                "level": null,
+                "total": 0
+              },
+              "code": "IMP-LESSON-L",
+              "side": "left"
+            },
+            {
+              "availability": {
+                "available": 9,
+                "generalAdmission": false,
+                "level": null,
+                "total": 20
+              },
+              "code": "IMP-LESSON-R",
+              "side": "right"
+            }
+          ],
+          "date": "2026-02-21",
+          "eventAk": "TWB.EVN44",
+          "fields": {
+            "description": null,
+            "image": null,
+            "imageSmall": "/api/twb-prod/b2c/v1/images/cached/BBScb-Nti6RYEGrEnP07Sw==",
+            "place": null,
+            "price": "BLANK",
+            "priceCurrency": "GBP",
+            "priceLabel": "",
+            "seatAssignmentType": null,
+            "seatMapId": null,
+            "tagline": null,
+            "title": "Improver Lesson"
+          },
+          "hasSection": true,
+          "isFullDay": false,
+          "isPast": false,
+          "performanceAK": "TWB.EVN44.PRF344",
+          "priceMax": 47.0,
+          "priceMin": 0.0,
+          "secondaryPerformanceAk": null,
+          "time": "14:30:00.000",
+          "timeEnd": "15:59:00.000"
+        },
+        {
+          "availability": {
+            "available": 14,
+            "generalAdmission": false,
+            "level": "HIGH",
+            "total": 20
+          },
+          "availabilityPerProduct": [
+            {
+              "availability": {
+                "available": 12,
+                "generalAdmission": false,
+                "level": null,
+                "total": 20
+              },
+              "code": "IMP-SURF-L",
+              "side": "left"
+            },
+            {
+              "availability": {
+                "available": 1,
+                "generalAdmission": false,
+                "level": null,
+                "total": 0
+              },
+              "code": "IMP-SURF-R",
+              "side": "right"
+            }
+          ],
+          "date": "2026-02-21",
+          "eventAk": "TWB.EVN43",
+          "fields": {
+            "description": null,
+            "image": null,
+            "imageSmall": "/api/twb-prod/b2c/v1/images/cached/CEK9z7FPpbqxTWcxlRtnjw==",
+            "place": null,
+            "price": "BLANK",
+            "priceCurrency": "GBP",
+            "priceLabel": "",
+            "seatAssignmentType": null,
+            "seatMapId": null,
+            "tagline": null,
+            "title": "Improver Surf"
+          },
+          "hasSection": true,
+          "isFullDay": false,
+          "isPast": false,
+          "performanceAK": "TWB.EVN43.PRF680",
+          "priceMax": 43.0,
+          "priceMin": 0.0,
+          "secondaryPerformanceAk": null,
+          "time": "15:00:00.000",
+          "timeEnd": "15:59:00.000"
+        },
+        {
+          "availability": {
+            "available": 23,
+            "generalAdmission": false,
+            "level": "HIGH",
+            "total": 24
+          },
+          "availabilityPerProduct": [
+            {
+              "availability": {
+                "available": 6,
+                "generalAdmission": false,
+                "level": null,
+                "total": 12
+              },
+              "code": "NEW-EXP-L",
+              "side": "left"
+            },
+            {
+              "availability": {
+                "available": 10,
+                "generalAdmission": false,
+                "level": null,
+                "total": 12
+              },
+              "code": "NEW-EXP-R",
+              "side": "right"
+            }
+          ],
+          "date": "2026-02-21",
+          "eventAk": "TWB.EVN17",
+          "fields": {
+            "description": null,
+            "image": null,
+            "imageSmall": "/api/twb-prod/b2c/v1/images/cached/aU9htf9vSVq-PTCX-Ao1YQ==",
+            "place": null,
+            "price": "BLANK",
+            "priceCurrency": "GBP",
+            "priceLabel": "",
+            "seatAssignmentType": null,
+            "seatMapId": null,
+            "tagline": null,
+            "title": "Expert Barrels Surf"
+          },
+          "hasSection": true,
+          "isFullDay": false,
+          "isPast": false,
+          "performanceAK": "TWB.EVN17.PRF1561",
+          "priceMax": 43.0,
+          "priceMin": 0.0,
+          "secondaryPerformanceAk": null,
+          "time": "16:00:00.000",
+          "timeEnd": "16:59:00.000"
+        },
+        {
+          "availability": {
+            "available": 32,
+            "generalAdmission": false,
+            "level": "HIGH",
+            "total": 34
+          },
+          "availabilityPerProduct": [
+            {
+              "availability": {
+                "available": 13,
+                "generalAdmission": false,
+                "level": null,
+                "total": 17
+              },
+              "code": "AP-SURF-L",
+              "side": "left"
+            },
+            {
+              "availability": {
+                "available": 7,
+                "generalAdmission": false,
+                "level": null,
+                "total": 17
+              },
+              "code": "AP-SURF-R",
+              "side": "right"
+            }
+          ],
+          "date": "2026-02-21",
+          "eventAk": "TWB.EVN8",
+          "fields": {
+            "description": null,
+            "image": null,
+            "imageSmall": "/api/twb-prod/b2c/v1/images/cached/RCHu07KcBX7r46LAu3xM1w==",
+            "place": null,
+            "price": "BLANK",
+            "priceCurrency": "GBP",
+            "priceLabel": "",
+            "seatAssignmentType": null,
+            "seatMapId": null,
+            "tagline": null,
+            "title": "Advanced Plus Surf"
+          },
+          "hasSection": true,
+          "isFullDay": false,
+          "isPast": false,
+          "performanceAK": "TWB.EVN8.PRF2446",
+          "priceMax": 43.0,
+          "priceMin": 0.0,
+          "secondaryPerformanceAk": null,
+          "time": "17:00:00.000",
+          "timeEnd": "17:59:00.000"
+        }
+      ],
+      "priceMax": null,
+      "priceMin": null
+    }
+  ],
+  "expires": 1767521722
+}

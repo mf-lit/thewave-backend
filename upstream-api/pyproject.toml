@@ -1,0 +1,17 @@
+[project]
+name = "upstream-api"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.31.0",
+    "flask>=3.0.0",
+    "flask-cors>=4.0.0",
+    "beautifulsoup4>=4.14.3",
+    "html5lib>=1.1",
+    "gunicorn>=21.2.0",
+    "apscheduler>=3.10.0",
+    "pyyaml>=6.0.0",
+    "wasmtime>=0.20.0",
+]
