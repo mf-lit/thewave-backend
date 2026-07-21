@@ -1,0 +1,122 @@
+services:
+  notifications:
+    build:
+      context: ./notifications
+      dockerfile: Dockerfile
+    container_name: thewave-notifications
+    ports:
+      - "5001:5001"
+    volumes:
+      # Mount config directory (read-only)
+      - /thewave/docker_vols/notifications/config:/app/config:ro
+      # Mount data directory for SQLite database persistence
+      - /thewave/docker_vols/notifications/data:/app/data
+    environment:
+      # Flask environment
+      - FLASK_ENV=production
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+
+  upstream-api:
+    build:
+      context: ./upstream-api
+      dockerfile: Dockerfile
+    container_name: thewave-upstream-api
+    ports:
+      - "5000:5000"
+    volumes:
+      # Mount config directory for API keys and upstream API URL
+      - /thewave/docker_vols/upstream-api/config:/app/config:ro
+      # Mount data directory for database and history files (read-write)
+      - /thewave/docker_vols/upstream-api/data:/app/data
+      - /thewave/docker_vols/shared:/app/shared
+    environment:
+      # Optional: Override port (default: 5000)
+      - PORT=5000
+      # Optional: Cache configuration
+      - CACHE_TTL_SECONDS=1201
+      
+      # Optional: Forecast and temperature settings
+      # - FORECAST_RELOAD_HOUR=1
+      # - HISTORICAL_TEMP_CACHE_SIZE=256
+      # - DB_TIMEOUT=30.0
+      
+      # Optional: Test mode (uses dummy data)
+      # - TEST_MODE=false
+      
+      # Python settings
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      - FLASK_ENV=production
+
+      # Prevent clients forcing refresh
+      - ALLOW_FORCE_REFRESH="false"
+      - OVPN_FLAG_FILE=/app/shared/ovpn_flag
+      - PROXY_HEALTH_FILE=/app/shared/proxy_health
+    restart: unless-stopped
+
+  log-alerter:
+    build: ./log-alerts
+    restart: unless-stopped
+    environment:
+      - WIREPUSHER_ID=AHTpmpGRm    # from the WirePusher app
+      - WIREPUSHER_TYPE=log-alert       # optional, customize in the app under "Types"
+      - LOG_PATTERN=error|exception|fatal|panic
+      - COOLDOWN=60
+      - CONTAINERS=thewave-notifications thewave-upstream-api          # leave unset to watch all
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  pia-openvpn-proxy:
+    build:
+      context: ./pia-openvpn-proxy
+      dockerfile: Dockerfile
+    container_name: pia-openvpn-proxy
+    cap_add:
+      - MKNOD
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
+        #    dns:
+        #- 209.222.18.218
+        #- 209.222.18.222
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /docker_vols/pia-openvpn-proxy/config:/config
+      - /thewave/docker_vols/shared:/shared
+    # if using wireguard, uncomment the next line
+    #privileged: true
+    environment:
+      - VPN_PROTOCOL=openvpn
+      - USERNAME=${PIAUNAME}
+      - PASSWORD=${PIAPASS}
+      - UID=1000
+      - GID=1000
+      - LOCAL_NETWORK=192.168.1.0/24
+    ports:
+      - 8119:8118
+    restart: always
+
+  cloudflared:
+    container_name: cloudflared
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    restart: unless-stopped
+
+  sqlite-web:
+    image: ghcr.io/coleifer/sqlite-web:latest
+    container_name: sqlite-web
+    restart: unless-stopped
+    ports:
+      - 5003:8080
+    volumes:
+      - /thewave/docker_vols/notifications/data:/notifications/data
+      - /thewave/docker_vols/upstream-api/data:/upstream-api/data
+    command: /notifications/data/notifications.db /upstream-api/data/water_temperature.db /upstream-api/data/prices.db
+
+networks:
+  default:
+    name: server-setup_default
+    external: true
