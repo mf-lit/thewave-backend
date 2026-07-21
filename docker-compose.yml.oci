@@ -92,7 +92,7 @@ services:
       - PASSWORD=${PIAPASS}
       - UID=1000
       - GID=1000
-      - LOCAL_NETWORK=192.168.1.0/24
+      - LOCAL_NETWORK=10.0.1.0/24
     ports:
       - 8119:8118
     restart: always
@@ -116,7 +116,3 @@ services:
       - /thewave/docker_vols/upstream-api/data:/upstream-api/data
     command: /notifications/data/notifications.db /upstream-api/data/water_temperature.db /upstream-api/data/prices.db
 
-networks:
-  default:
-    name: server-setup_default
-    external: true
