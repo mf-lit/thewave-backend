@@ -105,6 +105,30 @@ services:
       - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
     restart: unless-stopped
 
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: thewave-dashboard
+    ports:
+      - "5002:5002"
+    volumes:
+      # Not mounted :ro — these DBs are WAL-mode, so even read-only queries need
+      # to create -wal/-shm sidecar files in the directory (see sqlite-web below,
+      # which mounts the same paths the same way). The app itself only ever
+      # opens them with sqlite mode=ro and never writes real data.
+      - /thewave/docker_vols/upstream-api/data:/data/upstream-api
+      - /thewave/docker_vols/notifications/data:/data/notifications
+      # Dashboard's own writable store (end-of-day active-client snapshots)
+      - /thewave/docker_vols/dashboard/data:/app/data
+    environment:
+      - UPSTREAM_DB_PATH=/data/upstream-api/water_temperature.db
+      - NOTIFICATIONS_DB_PATH=/data/notifications/notifications.db
+      - DAILY_ACTIVE_DB_PATH=/app/data/daily_active.db
+      - PYTHONUNBUFFERED=1
+      - FLASK_ENV=production
+    restart: unless-stopped
+
   sqlite-web:
     build:
       context: ./sqlite-web
