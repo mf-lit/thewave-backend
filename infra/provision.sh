@@ -55,7 +55,7 @@ PACKAGES=(
   docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
   # Requested utilities
   vim-enhanced git ca-certificates gnupg2 pv pwgen whois jq
-  p7zip p7zip-plugins gcc make zip unzip moreutils tmux restic
+  p7zip p7zip-plugins gcc make zip unzip moreutils tmux restic sqlite
   # Tailscale mesh VPN (join the tailnet manually with `tailscale up --ssh`)
   tailscale
 )
@@ -210,6 +210,14 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# Restic backup/check cron jobs (see restic/restic.cron), copied verbatim into
+# /etc/cron.d so cronie picks it up automatically — no daemon reload needed.
+# ---------------------------------------------------------------------------
+ensure_restic_cron() {
+  install -m 0644 "$THEWAVE_INFRA_DIR/restic/restic.cron" /etc/cron.d/restic
+}
+
+# ---------------------------------------------------------------------------
 # Add new install/config steps below as idempotent functions, then call them
 # from main(). Keep each one safe to re-run.
 # ---------------------------------------------------------------------------
@@ -225,6 +233,7 @@ main() {
   ensure_uv
   ensure_tfenv
   ensure_oci_cli
+  ensure_restic_cron
   echo "=== provision.sh complete $(date -u +%FT%TZ) ==="
 }
 

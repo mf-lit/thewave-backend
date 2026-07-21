@@ -4,3 +4,7 @@
 /pia-openvpn-proxy/
 
 /docker_vols/
+/db_backup/
+
+# plaintext secrets — encrypted copy (restic.env.asc) is committed instead
+/infra/restic/restic.env

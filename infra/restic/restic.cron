@@ -1,0 +1,2 @@
+0 1 */2 * * root /thewave/infra/restic/restic-backup.sh 2>&1 | /usr/bin/ts >>/var/log/restic-backup.log
+0 3 */7 * * root /thewave/infra/restic/restic-check.sh 2>&1 | /usr/bin/ts >>/var/log/restic-check.log 
