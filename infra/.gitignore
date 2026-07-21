@@ -20,3 +20,6 @@ oci_api_key*
 
 # Cached bastion session + its ephemeral private key (push-provision.sh)
 .push-session/
+
+# Restic backup secrets (B2 key, restic password) — never commit plaintext
+restic/restic.env

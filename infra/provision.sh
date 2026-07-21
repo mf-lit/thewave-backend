@@ -55,7 +55,7 @@ PACKAGES=(
   docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
   # Requested utilities
   vim-enhanced git ca-certificates gnupg2 pv pwgen whois jq
-  p7zip p7zip-plugins gcc make zip moreutils tmux
+  p7zip p7zip-plugins gcc make zip unzip moreutils tmux restic
   # Tailscale mesh VPN (join the tailnet manually with `tailscale up --ssh`)
   tailscale
 )
@@ -121,6 +121,54 @@ ensure_claude() {
 }
 
 # ---------------------------------------------------------------------------
+# uv, for PRIMARY_USER — needed to install the OCI CLI as a uv tool (see
+# ensure_oci_cli below). Installer drops the binary in ~/.local/bin, already
+# on PATH from ensure_claude.
+# ---------------------------------------------------------------------------
+ensure_uv() {
+  local home=/home/$PRIMARY_USER
+  sudo -u "$PRIMARY_USER" test -x "$home/.local/bin/uv" && return 0
+  sudo -u "$PRIMARY_USER" bash -c 'curl -LsSf https://astral.sh/uv/install.sh | sh'
+}
+
+# ---------------------------------------------------------------------------
+# tfenv + Terraform, for PRIMARY_USER, matching the "Tooling / environment"
+# section of CLAUDE.md. Installs tfenv itself via git clone (updated in place
+# on re-runs), then — if this repo is checked out at THEWAVE_INFRA_DIR — pins
+# the version from its .terraform-version file. tfenv install is itself
+# idempotent (no-op if that version is already installed).
+# ---------------------------------------------------------------------------
+THEWAVE_INFRA_DIR=/thewave/infra
+
+ensure_tfenv() {
+  local home=/home/$PRIMARY_USER
+  local rc=$home/.bashrc
+
+  if sudo -u "$PRIMARY_USER" test -d "$home/.tfenv"; then
+    sudo -u "$PRIMARY_USER" git -C "$home/.tfenv" pull --ff-only
+  else
+    sudo -u "$PRIMARY_USER" git clone --depth=1 https://github.com/tfutils/tfenv.git "$home/.tfenv"
+  fi
+
+  sudo -u "$PRIMARY_USER" grep -qxF 'export PATH="$HOME/.tfenv/bin:$PATH"' "$rc" 2>/dev/null \
+    || echo 'export PATH="$HOME/.tfenv/bin:$PATH"' | sudo -u "$PRIMARY_USER" tee -a "$rc" >/dev/null
+
+  if sudo -u "$PRIMARY_USER" test -f "$THEWAVE_INFRA_DIR/.terraform-version"; then
+    sudo -u "$PRIMARY_USER" bash -c "cd '$THEWAVE_INFRA_DIR' && '$home/.tfenv/bin/tfenv' install"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# OCI CLI, for PRIMARY_USER, installed as a uv tool per CLAUDE.md. Requires
+# ensure_uv to have run. Auth (~/.oci/config, API key) is a secret and can't
+# be provisioned here — set it up interactively as PRIMARY_USER afterwards.
+# ---------------------------------------------------------------------------
+ensure_oci_cli() {
+  local home=/home/$PRIMARY_USER
+  sudo -u "$PRIMARY_USER" bash -c "\"$home/.local/bin/uv\" tool install oci-cli"
+}
+
+# ---------------------------------------------------------------------------
 # Primary login user — the account for day-to-day work, and the one that owns
 # the Claude Code install below.
 #
@@ -174,6 +222,9 @@ main() {
   ensure_compose_shim
   ensure_tailscale
   ensure_claude
+  ensure_uv
+  ensure_tfenv
+  ensure_oci_cli
   echo "=== provision.sh complete $(date -u +%FT%TZ) ==="
 }
 
