@@ -32,11 +32,15 @@ output "connect_hint" {
     # Use an ed25519 key — OCI Bastion rejects RSA keys on modern OpenSSH.
     #   ssh-keygen -t ed25519 -f ~/.ssh/oci_thewave   # once
 
+    # 'marc' is the primary user, created by provision.sh. If provisioning has
+    # never completed on this box, marc won't exist yet — swap both occurrences
+    # below for 'opc', the cloud-init default / break-glass account.
+
     # 1) Open a managed-SSH session and capture its OCID (session, not work-req):
     SID=$(oci bastion session create-managed-ssh \
       --bastion-id ${oci_bastion_bastion.main.id} \
       --target-resource-id ${oci_core_instance.main.id} \
-      --target-os-username opc \
+      --target-os-username marc \
       --ssh-public-key-file ~/.ssh/oci_thewave.pub \
       --session-ttl 10800 --query 'data.id' --raw-output)
 
@@ -46,6 +50,6 @@ output "connect_hint" {
     # 3) SSH in through the bastion:
     ssh -i ~/.ssh/oci_thewave \
       -o ProxyCommand="ssh -i ~/.ssh/oci_thewave -W %h:%p -p 22 $SID@host.bastion.${var.region}.oci.oraclecloud.com" \
-      opc@${oci_core_instance.main.private_ip}
+      marc@${oci_core_instance.main.private_ip}
   EOT
 }

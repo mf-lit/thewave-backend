@@ -65,6 +65,18 @@ Terraform renders via `templatefile()` with the script embedded; cloud-init writ
   `retry`/backoff wrapper around the copy + run. **This needs `tailscale up --ssh` on the box (a
   manual step — see below) and the caller on the same tailnet**; until then it always uses the bastion.
 
+**Two accounts, on purpose: `marc` is primary, `opc` is bootstrap/break-glass.** `provision.sh`
+creates `marc` (`PRIMARY_USER`) with wheel + docker + passwordless sudo, and Claude Code is
+installed under that account. `opc` is **not** retired and shouldn't be — it's the OL9 cloud-init
+default, it's where Terraform's `metadata.ssh_authorized_keys` lands, and it's the only user
+guaranteed to exist before `provision.sh` has ever run. Consequences:
+
+- `push-provision.sh` logs in as **`marc` over Tailscale but `opc` over the bastion** (`TS_USER` /
+  `BASTION_USER`). This is deliberate, not an oversight: the script is what *creates* `marc`, so
+  pointing the bastion path at `marc` would be circular and would fail on exactly the fresh or
+  half-provisioned box where that path is the only way in.
+- If provisioning ever half-fails and `marc` is missing, connect as `opc` and re-push.
+
 **Changing `user_data` is the only ignored metadata — other instance changes still force
 replacement.** Editing `ssh_authorized_keys`, shape, image, subnet, `availability_domain`, etc.
 replaces the instance, which throws you back into the A1 capacity lottery. Avoid unless intended.
@@ -89,8 +101,9 @@ replaces the instance, which throws you back into the A1 capacity lottery. Avoid
 - **A1 "Out of host capacity"** on apply is a capacity issue, not a config bug. London has 3 ADs;
   `apply-until-capacity.sh` cycles all of them. Pay-As-You-Go removes the capacity deprioritization.
 - **Tailscale and Claude Code are installed but need a one-time interactive auth** that can't live
-  in `provision.sh`. On the box as `opc`: `sudo tailscale up --ssh` (join the tailnet + enable
-  direct SSH, completing the printed login), and `claude` (first-run login). `provision.sh` only
+  in `provision.sh`. On the box: `sudo tailscale up --ssh` (join the tailnet + enable direct SSH,
+  completing the printed login), and `claude` (first-run login) **as `marc`** — Claude Code's auth
+  is per-user under `~/.claude`, so logging in as `opc` does not carry over. `provision.sh` only
   installs the packages / enables `tailscaled`.
 
 ## Cost guardrails (`quota.tf`)

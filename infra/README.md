@@ -56,15 +56,19 @@ terraform apply
 SID=$(oci bastion session create-managed-ssh \
   --bastion-id "$(terraform output -raw bastion_id)" \
   --target-resource-id "$(terraform output -raw instance_id)" \
-  --target-os-username opc --ssh-public-key-file ~/.ssh/oci_thewave.pub \
+  --target-os-username marc --ssh-public-key-file ~/.ssh/oci_thewave.pub \
   --session-ttl 10800 --query 'data.id' --raw-output)
 
 # 2) Wait until ACTIVE, then 3) SSH in
 oci bastion session get --session-id "$SID" --query 'data."lifecycle-state"' --raw-output
 ssh -i ~/.ssh/oci_thewave \
   -o ProxyCommand="ssh -i ~/.ssh/oci_thewave -W %h:%p -p 22 $SID@host.bastion.$(terraform output -raw region).oci.oraclecloud.com" \
-  opc@"$(terraform output -raw instance_private_ip)"
+  marc@"$(terraform output -raw instance_private_ip)"
 ```
+
+> `marc` is the primary user, created by `provision.sh`. On a box where
+> provisioning has never completed, `marc` won't exist yet — use `opc` (the
+> cloud-init default / break-glass account) for both fields above instead.
 
 ## Cost guardrails (`quota.tf`)
 
@@ -95,7 +99,12 @@ boot. `provision.sh` is the single source of truth; there is only one copy.
 What it installs (Ubuntu/apt names mapped to OL9/dnf):
 
 - **Docker CE** (`docker-ce`, CLI, `containerd.io`, buildx + compose plugins) plus a `docker-compose`
-  shim over `docker compose`. Docker is enabled and `opc` is added to the `docker` group.
+  shim over `docker compose`. Docker is enabled and both `marc` and `opc` are in the `docker` group.
+- **The `marc` user** — the primary login account: wheel (passwordless sudo), docker, and an
+  `authorized_keys` seeded from the key embedded in `provision.sh`. `opc` stays as the cloud-init
+  default and break-glass account.
+- **Claude Code**, installed under `marc` via the official native installer (first run still needs
+  an interactive `claude` login as that user).
 - **EPEL + CodeReady Builder (CRB)** enabled for `pv`, `pwgen`, `whois`, `p7zip`, `moreutils`
   (`moreutils` needs a CRB dependency — without CRB the whole atomic dnf transaction fails).
 - `vim-enhanced`, `git`, `ca-certificates`, `gnupg2` (gpg-agent), `jq`, `gcc`, `make`, `zip`.
@@ -118,7 +127,7 @@ instance still bakes in the current script. Add new steps as idempotent function
 - On the instance: `curl -sS ifconfig.me` → returns a public IP (NAT egress works).
 - `sudo dnf check-update` → package metadata downloads (Service Gateway / NAT).
 - `terraform output instance_private_ip` is a `10.0.1.x` address; the instance has **no** public IP.
-- `docker run --rm hello-world` as `opc` (no sudo) → Docker installed and group applied.
+- `docker run --rm hello-world` as `marc` (no sudo) → Docker installed and group applied.
 - Provisioning log on the box: `/var/log/thewave-provision.log`.
 
 ## Teardown

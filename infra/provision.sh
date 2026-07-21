@@ -67,7 +67,8 @@ ensure_packages() {
 }
 
 # ---------------------------------------------------------------------------
-# Docker daemon + non-root access for the default 'opc' user
+# Docker daemon + non-root access. opc keeps it for break-glass use;
+# PRIMARY_USER is granted the same in ensure_primary_user below.
 # ---------------------------------------------------------------------------
 ensure_docker() {
   systemctl enable --now docker
@@ -98,20 +99,66 @@ ensure_tailscale() {
 }
 
 # ---------------------------------------------------------------------------
-# Claude Code CLI, installed for the login user (opc) via the official native
-# installer (self-contained binary, no Node needed). Idempotent: skip if it's
-# already present — the binary self-updates, so re-running only reinstalls.
-# The installer drops it in ~opc/.local/bin and adds that to opc's shell PATH.
+# Claude Code CLI, installed for PRIMARY_USER via the official native installer
+# (self-contained binary, no Node needed). Idempotent: skip if it's already
+# present — the binary self-updates, so re-running only reinstalls. The
+# installer drops it in ~/.local/bin and adds that to the user's shell PATH.
+#
+# Requires ensure_primary_user to have run. The first `claude` still needs an
+# interactive login as that user — auth lives in their ~/.claude and can't be
+# provisioned here.
 # ---------------------------------------------------------------------------
 ensure_claude() {
   # Make ~/.local/bin reachable on login (the installer warns but won't edit an
   # existing .bashrc). grep-guard keeps it to a single line across re-runs.
-  local rc=/home/opc/.bashrc
-  sudo -u opc grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$rc" 2>/dev/null \
-    || echo 'export PATH="$HOME/.local/bin:$PATH"' | sudo -u opc tee -a "$rc" >/dev/null
+  local home=/home/$PRIMARY_USER
+  local rc=$home/.bashrc
+  sudo -u "$PRIMARY_USER" grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$rc" 2>/dev/null \
+    || echo 'export PATH="$HOME/.local/bin:$PATH"' | sudo -u "$PRIMARY_USER" tee -a "$rc" >/dev/null
 
-  sudo -u opc test -x /home/opc/.local/bin/claude && return 0
-  sudo -u opc bash -c 'curl -fsSL https://claude.ai/install.sh | bash'
+  sudo -u "$PRIMARY_USER" test -x "$home/.local/bin/claude" && return 0
+  sudo -u "$PRIMARY_USER" bash -c 'curl -fsSL https://claude.ai/install.sh | bash'
+}
+
+# ---------------------------------------------------------------------------
+# Primary login user — the account for day-to-day work, and the one that owns
+# the Claude Code install below.
+#
+# 'opc' (the OL9 cloud-init default) is deliberately NOT retired. It's the only
+# user guaranteed to exist before this script has run, it's where Terraform's
+# metadata.ssh_authorized_keys lands, and the bastion targets it — so it stays
+# as the bootstrap and break-glass account for when provisioning fails and
+# PRIMARY_USER doesn't exist yet.
+#
+# wheel gives passwordless sudo, matching the OL9 default for opc. The docker
+# group is created by the docker-ce package, so ensure_packages runs first.
+#
+# The key is embedded here rather than copied from opc's authorized_keys — the
+# bastion injects short-lived managed-SSH session keys into that file, and
+# copying would bake expired session keys into this account.
+# ---------------------------------------------------------------------------
+PRIMARY_USER=marc
+PRIMARY_USER_SSH_KEY='ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC8O7HNu58AvTYz7fw6ZaRkpP5nnIofdczKIS5fKhzswqTEa5ovIFl/5QDegU/E5F3noVxoFZ4lp/BjSCUFEBQZfok9R/+fxfDMKk2DcWuPpWmhw6/bl47WLCBM3qxKUD59pSqMbKqZ05lO0EOszhW33yfuLjPhMBE2YtyAhBcMzmrkTNG9+9FLG4obSQLx/G4Zbg3hUEkp/tzzXyaJmc6hyl+M16WmOVI72wV1egEDVHIyMvzUVOmgJzC08jXJhqf0DGZPz7/1KPTN9OtZtQf4ArbhQrnZimyvsi0T1csltrvIErNVaBYl/nmoR0rZhOo6a6JNdh0f5GyLfADRA2A1 marc'
+
+ensure_primary_user() {
+  id -u "$PRIMARY_USER" >/dev/null 2>&1 || useradd -m -s /bin/bash "$PRIMARY_USER"
+
+  # Group membership is additive and checked, so re-runs are no-ops.
+  id -nG "$PRIMARY_USER" | grep -qw wheel || usermod -aG wheel "$PRIMARY_USER"
+  id -nG "$PRIMARY_USER" | grep -qw docker || usermod -aG docker "$PRIMARY_USER"
+
+  # Unquoted heredoc: $PRIMARY_USER must expand.
+  install -m 0440 /dev/stdin "/etc/sudoers.d/90-$PRIMARY_USER" <<EOF
+$PRIMARY_USER ALL=(ALL) NOPASSWD:ALL
+EOF
+
+  local home=/home/$PRIMARY_USER
+  install -d -m 0700 -o "$PRIMARY_USER" -g "$PRIMARY_USER" "$home/.ssh"
+  # Rewritten wholesale each run: the key above is the source of truth, so a
+  # key added by hand on the box will be reverted on the next push.
+  printf '%s\n' "$PRIMARY_USER_SSH_KEY" > "$home/.ssh/authorized_keys"
+  chown "$PRIMARY_USER:$PRIMARY_USER" "$home/.ssh/authorized_keys"
+  chmod 0600 "$home/.ssh/authorized_keys"
 }
 
 # ---------------------------------------------------------------------------
@@ -123,6 +170,7 @@ main() {
   ensure_repos
   ensure_packages
   ensure_docker
+  ensure_primary_user
   ensure_compose_shim
   ensure_tailscale
   ensure_claude

@@ -13,6 +13,12 @@
 #   2. Fall back to the OCI bastion when Tailscale isn't up, the box isn't a
 #      reachable peer, or the SSH probe fails.
 #
+# The two transports log in as DIFFERENT users, deliberately. Tailscale uses
+# the primary user (marc). The bastion stays on opc because this script is what
+# creates marc — targeting marc there would be circular, and would fail exactly
+# on a fresh or half-provisioned box, which is when the bastion path matters.
+# Both users have passwordless sudo, which the run step below needs.
+#
 # Bastion sessions use an ed25519 key (OCI Bastion rejects RSA on modern
 # OpenSSH). A managed-SSH session is bound to the exact public key injected at
 # creation, so an existing session can only be reused if we still hold its
@@ -25,6 +31,8 @@ export PATH="$HOME/.tfenv/bin:$HOME/.local/bin:$PATH"
 cd "$(dirname "$0")"
 
 TS_NAME=thewave-ampere  # tailnet machine name of the instance
+TS_USER=marc            # primary user; Tailscale transport logs in as this
+BASTION_USER=opc        # bootstrap/break-glass user; see the note above
 SESSION_TTL=1800        # seconds; TTL of a newly created bastion session
 MIN_REMAINING=180       # recreate if a cached session has less than this left
 CACHE=.push-session     # holds key, key.pub, sid (all gitignored)
@@ -64,7 +72,7 @@ tailscale_target() {
   fi
   # BatchMode so an unreachable host times out instead of hanging on a prompt.
   ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8 -o BatchMode=yes \
-    "opc@${target}" true 2>/dev/null || return 1
+    "${TS_USER}@${target}" true 2>/dev/null || return 1
   echo "$target"
 }
 
@@ -89,7 +97,7 @@ cached_session_usable() {
 # ---------------------------------------------------------------------------
 if TARGET=$(tailscale_target); then
   echo ">>> reaching $TS_NAME directly over Tailscale ($TARGET) ..."
-  DEST="opc@${TARGET}"
+  DEST="${TS_USER}@${TARGET}"
   SSH_CMD=(ssh -o StrictHostKeyChecking=accept-new)
   SCP_CMD=(scp -o StrictHostKeyChecking=accept-new)
 else
@@ -110,7 +118,7 @@ else
     SID=$(oci bastion session create-managed-ssh \
       --bastion-id "$BASTION_ID" \
       --target-resource-id "$INSTANCE_ID" \
-      --target-os-username opc \
+      --target-os-username "$BASTION_USER" \
       --ssh-public-key-file "$CACHE/key.pub" \
       --session-ttl "$SESSION_TTL" \
       --query 'data.id' --raw-output)
@@ -127,18 +135,21 @@ else
 
   PROXY="ssh -i $CACHE/key -o StrictHostKeyChecking=accept-new -W %h:%p -p 22 ${SID}@host.bastion.${REGION}.oci.oraclecloud.com"
   OPTS=(-i "$CACHE/key" -o StrictHostKeyChecking=accept-new -o "ProxyCommand=$PROXY")
-  DEST="opc@${IP}"
+  DEST="${BASTION_USER}@${IP}"
   SSH_CMD=(ssh "${OPTS[@]}")
   SCP_CMD=(scp "${OPTS[@]}")
 fi
 
 echo ">>> copying provision.sh to the instance ..."
-retry "${SCP_CMD[@]}" provision.sh "${DEST}:/tmp/provision.sh"
+# Staged in the connecting user's home, NOT /tmp: /tmp is sticky (1777), so a
+# copy left there by one transport's user (opc via the bastion) can't be
+# overwritten by the other's (marc via Tailscale) — it fails with EACCES.
+retry "${SCP_CMD[@]}" provision.sh "${DEST}:provision.sh"
 
 echo ">>> running provision.sh on the instance ..."
 # provision.sh is idempotent, so retrying the whole run is safe if a mid-run
 # connection drop leaves it partially applied.
 retry "${SSH_CMD[@]}" "$DEST" \
-  'sudo install -m 0755 -D /tmp/provision.sh /opt/thewave/provision.sh && sudo /opt/thewave/provision.sh'
+  'sudo install -m 0755 -D "$HOME/provision.sh" /opt/thewave/provision.sh && sudo /opt/thewave/provision.sh'
 
 echo ">>> done."
