@@ -3,7 +3,7 @@
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
-for i in .env *.env copyparty/server.conf ; do
+for i in .env ; do
 	echo "Encrypting $i..."
 	sleep 1
 	gpg -c --armor $i
