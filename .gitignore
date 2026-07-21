@@ -2,3 +2,5 @@
 
 # pia-openvpn-proxy remains a standalone repo, not part of this monorepo
 /pia-openvpn-proxy/
+
+/docker_vols/
