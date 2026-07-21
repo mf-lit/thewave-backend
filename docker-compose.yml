@@ -82,7 +82,7 @@ services:
         #- 209.222.18.222
     volumes:
       - /etc/localtime:/etc/localtime:ro
-      - /docker_vols/pia-openvpn-proxy/config:/config
+      - /thewave/docker_vols/pia-openvpn-proxy/config:/config
       - /thewave/docker_vols/shared:/shared
     # if using wireguard, uncomment the next line
     #privileged: true
@@ -106,7 +106,9 @@ services:
     restart: unless-stopped
 
   sqlite-web:
-    image: ghcr.io/coleifer/sqlite-web:latest
+    build:
+      context: ./sqlite-web
+      dockerfile: Dockerfile
     container_name: sqlite-web
     restart: unless-stopped
     ports:
