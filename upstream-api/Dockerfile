@@ -11,7 +11,7 @@ RUN apt-get update && \
     tzdata && \
     rm -rf /var/lib/apt/lists/* && \
     groupadd -r appuser && \
-    useradd -r -g appuser appuser
+    useradd -r -m -g appuser appuser
 
 # Set working directory
 WORKDIR /app
