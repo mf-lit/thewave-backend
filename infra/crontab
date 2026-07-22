@@ -1,0 +1,14 @@
+SHELL=/bin/bash
+# The Wave price scraper: every 5 days, next 35 days, throttled to a 14h target
+0 23 1,6,11,16,21,26 * * cd /thewave/price-scraper && /home/marc/.local/bin/uv run python -m price_scraper collect --days 35 --max-delay 20s --target-time 8h --db /thewave/docker_vols/upstream-api/data/prices.db --proxy http://127.0.0.1:8119 2>&1 | /usr/bin/ts >> /thewave/docker_vols/upstream-api/data/scrape.log && /usr/bin/curl -fsS -m 10 --retry 5 -o /dev/null https://hc-ping.com/a3941a79-85fa-4e22-86d9-97ac627e7b13
+
+# The Wave lake temperature ML
+0 */1 * * * /thewave/ml/get_current_conditions.sh && /usr/bin/curl -fsS -m 10 --retry 5 -o /dev/null https://hc-ping.com/c543bf7c-93bc-4b54-b923-25c864b6fa55
+30 */1 * * * /thewave/ml/scripts/run_forecast.sh --latest-path /thewave/docker_vols/upstream-api/data/latest.csv >> /thewave/ml/logs/forecast.log 2>&1 && /usr/bin/curl -fsS -m 10 --retry 5 -o /dev/null https://hc-ping.com/7a8425de-73ce-4158-b46b-6dc463b493b4
+30 3 1 * * /thewave/ml/scripts/run_retrain.sh >> /thewave/ml/logs/retrain.log 2>&1 && /usr/bin/curl -fsS -m 10 --retry 5 -o /dev/null  https://hc-ping.com/08a968c7-03fe-4c9e-8756-9364159c26d3
+
+# The Wave dashboard: snapshot active clients just before UTC midnight (charts bucket by UTC).
+# CRON_TZ=UTC is last so it scopes ONLY this entry.
+CRON_TZ=UTC
+55 23 * * * /usr/bin/docker exec thewave-dashboard uv run python scripts/snapshot_active.py >> /thewave/docker_vols/dashboard/data/snapshot.log 2>&1
+

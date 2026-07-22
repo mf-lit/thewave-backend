@@ -218,6 +218,18 @@ ensure_restic_cron() {
 }
 
 # ---------------------------------------------------------------------------
+# PRIMARY_USER's crontab (price scraper, ML forecast/retrain, dashboard
+# snapshot), loaded verbatim from infra/crontab. Unlike restic.cron above,
+# this has no per-line user field, so it's a user crontab (`crontab -u`), not
+# a /etc/cron.d drop-in. `crontab -u` replaces the whole table each run, so
+# this file is the single source of truth — edits made directly on the box
+# via `crontab -e` would be reverted on the next push.
+# ---------------------------------------------------------------------------
+ensure_primary_user_crontab() {
+  crontab -u "$PRIMARY_USER" "$THEWAVE_INFRA_DIR/crontab"
+}
+
+# ---------------------------------------------------------------------------
 # Add new install/config steps below as idempotent functions, then call them
 # from main(). Keep each one safe to re-run.
 # ---------------------------------------------------------------------------
@@ -234,6 +246,7 @@ main() {
   ensure_tfenv
   ensure_oci_cli
   ensure_restic_cron
+  ensure_primary_user_crontab
   echo "=== provision.sh complete $(date -u +%FT%TZ) ==="
 }
 
