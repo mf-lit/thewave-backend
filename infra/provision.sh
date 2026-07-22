@@ -22,6 +22,15 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# System timezone. timedatectl set-timezone is itself idempotent, but guard it
+# anyway so re-runs don't pay the systemd-timedated round trip when unchanged.
+# ---------------------------------------------------------------------------
+ensure_timezone() {
+  [ "$(timedatectl show --property=Timezone --value)" = "Europe/London" ] \
+    || timedatectl set-timezone Europe/London
+}
+
+# ---------------------------------------------------------------------------
 # Package repositories
 # ---------------------------------------------------------------------------
 ensure_repos() {
@@ -235,6 +244,7 @@ ensure_primary_user_crontab() {
 # ---------------------------------------------------------------------------
 
 main() {
+  ensure_timezone
   ensure_repos
   ensure_packages
   ensure_docker
