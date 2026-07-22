@@ -38,7 +38,6 @@ Thumbs.db
 Dockerfile
 .dockerignore
 
-# Local data / scripts not needed at runtime
+# Local data not needed at runtime
 data/
-scripts/
 .claude/
