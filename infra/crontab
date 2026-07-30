@@ -10,5 +10,5 @@ SHELL=/bin/bash
 # The Wave dashboard: snapshot active clients just before UTC midnight (charts bucket by UTC).
 # CRON_TZ=UTC is last so it scopes ONLY this entry.
 CRON_TZ=UTC
-55 23 * * * /usr/bin/docker exec thewave-dashboard uv run python scripts/snapshot_active.py >> /thewave/docker_vols/dashboard/data/snapshot.log 2>&1
+55 23 * * * /usr/bin/docker exec thewave-dashboard uv run python scripts/snapshot_active.py >> /thewave/docker_vols/dashboard/data/snapshot.log 2>&1 && /usr/bin/curl -fsS -m 10 --retry 5 -o /dev/null https://hc-ping.com/9003681f-15a3-40d3-ab33-1fafc6138eae
 
