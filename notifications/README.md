@@ -1,160 +1,206 @@
-# Notifications System Backend
+# Notifications
 
-Backend service for managing session availability notifications for the waveform mobile app.
+Watches session availability at The Wave and pushes to the waveform mobile app
+when something a user is waiting for changes.
 
-## Overview
+Two processes over one SQLite file:
 
-This system consists of two main components:
+- **API** (`src.wsgi:app`, port 5001) — clients register a device token and the
+  sessions they care about.
+- **Worker** (`python -m src.worker`) — polls the upstream calendar API for the
+  sessions that are due a check, and pushes via Firebase Cloud Messaging.
 
-1. **Flask API** - RESTful endpoints for clients to manage their notifications
-2. **Daemon Service** - Periodically checks session availability and sends notifications
+## Layout
 
-## Architecture
+```
+src/
+  settings.py         env vars + config.yaml (mtime-cached, so keys rotate live)
+  clock.py            Europe/London session times vs UTC storage timestamps
+  db.py               per-thread connections, WAL, busy timeout
+  migrations.py       additive-only, tracked by PRAGMA user_version
+  models.py           validation; the client-visible error strings
+  repository.py       all SQL
+  calendar_client.py  upstream calendar API
+  scheduling.py       how long until the next check
+  evaluator.py        pure notify/don't-notify decision
+  push.py             FCM payloads and delivery
+  worker.py           the check loop
+  admin.py            maintenance CLI
+  api/                Flask factory, auth, routes, error handling
+tests/
+```
 
-- **Storage**: SQLite (lightweight, embedded database)
-- **API Framework**: Flask
-- **Language**: Python 3.11+
+Two other services read the database directly — the dashboard ATTACHes it
+read-only, and sqlite-web browses it — so migrations only ever add.
 
-## Setup
-
-### Prerequisites
-
-- Python 3.11 or higher
-- UV package manager
-
-### Installation
+## Running
 
 ```bash
-# Install dependencies using UV
 uv sync
+uv run pytest
+
+# API
+uv run gunicorn --workers 2 --bind 0.0.0.0:5001 src.wsgi:app
+# Worker
+uv run python -m src.worker
 ```
 
-### Environment Variables
+In production both run as containers from the same image; see
+`/thewave/docker-compose.yml`.
 
-- `CALENDAR_API_URL` - Upstream calendar API URL (default: `http://localhost:5000/calendar`)
-- `CALENDAR_API_KEY` - API key for authenticating with the calendar API (required, passed as `x-api-key` header)
-- `SQLITE_DB_PATH` - Path to SQLite database file (default: `data/notifications.db`)
+### Configuration
 
-## Usage
+| Variable | Default | Purpose |
+|---|---|---|
+| `SQLITE_DB_PATH` | `data/notifications.db` | database file |
+| `NOTIFICATIONS_CONFIG_PATH` | `config/config.yaml` | API keys, calendar key |
+| `CALENDAR_API_URL` | `http://localhost:5000/calendar` | upstream calendar |
+| `CALENDAR_API_KEY` | — | overrides `calendar_api_key` in the config file |
+| `GOOGLE_APPLICATION_CREDENTIALS` | `config/google_application_credentials.json` | Firebase service account |
+| `DISABLE_API_AUTH` | unset | skip API key checks (local development only) |
+| `WORKER_HEARTBEAT_PATH` | `data/worker-heartbeat` | touched each cycle; the container healthcheck reads it |
+| `LOG_LEVEL` | `INFO` | |
 
-### Running the API Server
+`config/config.yaml` (see `config.yaml.example`):
 
-```bash
-python -m src.api.app
+```yaml
+api_keys:
+  - <key>
+calendar_api_key: <key for the upstream API>
 ```
 
-The API will be available at `http://localhost:5001`
+The API refuses to start if this file has no keys and `DISABLE_API_AUTH` is
+unset. Edits are picked up without a restart.
 
-### Running the Daemon
+## API
 
-```bash
-python -m src.daemon.scheduler
-```
+Every endpoint except `/health` requires an `x-api-key` header, and every path
+is scoped to a client UUID. Errors are always `{"error": "<message>"}`.
 
-The daemon will:
-- Check availability every 10 minutes
-- Automatically delete notifications for past sessions
-- Send notifications when conditions are met (currently logs to console)
+### `POST /clients/{client_id}/notifications` → 201
 
-## API Endpoints
-
-All endpoints are scoped to a client UUID.
-
-### Create Notification
-
-```http
-POST /clients/{client_id}/notifications
-Content-Type: application/json
-
+```json
 {
-  "date": "2025-12-30",
-  "time": "10:00",
-  "side": "left",
+  "performance_ak": "TWB.EVN6.PRF8962",
+  "date": "2026-08-05",
+  "time": "18:00",
+  "side": "right",
   "notification_type": "below_threshold",
   "thresholds": [5, 2]
 }
 ```
 
-**Notification Types:**
-- `below_threshold`: Notify when availability falls below specified thresholds
-- `above_zero`: Notify when availability increases above zero
+`side` is `left`, `right` or `none`. `time` accepts `HH:MM`, `HH:MM:SS` or
+`HH:MM:SS.mmm` and is stored as `HH:MM`. `thresholds` is required for
+`below_threshold` and ignored otherwise.
 
-### List Notifications
+- `below_threshold` — push the first time availability falls to or below each
+  threshold. Each threshold fires once.
+- `above_zero` — push when a sold-out session gets a seat back. Re-arms if it
+  sells out again.
 
-```http
-GET /clients/{client_id}/notifications
+The performance is validated against the calendar API, so a bad
+`performance_ak` gives 404 and a side that isn't sold gives 400.
+
+Responses carry `thresholds` only for `below_threshold`, and
+`last_checked_availability` only once the worker has read it:
+
+```json
+{
+  "notification_id": "...", "client_id": "...", "performance_ak": "...",
+  "date": "2026-08-05", "time": "18:00", "side": "right",
+  "title": "Advanced Surf", "notification_type": "below_threshold",
+  "thresholds": [5, 2], "created_at": "2026-07-30T18:45:07.127058"
+}
 ```
 
-### Delete Notification
+### `GET /clients/{client_id}/notifications` → 200
 
-```http
-DELETE /clients/{client_id}/notifications/{notification_id}
+A bare JSON array.
+
+### `DELETE /clients/{client_id}/notifications/{notification_id}` → 200
+
+`{"message": "Notification deleted"}`, or 404 if it isn't that client's.
+
+Notifications are also deleted automatically once their session starts.
+
+### `PUT /clients/{client_id}/fcm-token` → 200
+
+`{"fcm_token": "..."}` → `{"message": "FCM token saved successfully", "updated_at": "..."}`.
+Tokens must be 140–200 characters of `[A-Za-z0-9:_-]`. Sending a new one
+replaces the old.
+
+### `GET /clients/{client_id}/fcm-token` → 200 / 404
+
+`{"has_token": true}`. The token itself is never returned.
+
+### `DELETE /clients/{client_id}/fcm-token` → 200 / 404
+
+### `GET /health` → 200
+
+`{"status": "ok"}`, no auth.
+
+## Push payload
+
+The Flutter app parses the FCM `data` map and iOS renders the notification
+block, so both are a contract with the shipped app — changing a key or a
+string needs an app release. `tests/test_push.py` pins them.
+
+```
+title  "Advanced Surf: 5th Jan at 18:00"
+body   "Availability dropped to 3 on the right"   (below_threshold)
+       "A session has become available"           (above_zero)
+data   performance_ak, date, time, side, session_title,
+       availability, notification_type, notification_id, threshold
 ```
 
-## Database Schema
+A token FCM reports as unregistered, or as belonging to another Firebase
+project, is deleted.
 
-### Notifications Table
+## Check intervals
+
+Two tables in `scheduling.py`, one keyed on days until the session and one on
+seats remaining; the tighter wins. Sold-out and imminent is polled every three
+minutes, distant and empty every four hours. Each notification carries its own
+`next_check_at`, so the worker only ever fetches the dates it needs.
+
+## Maintenance
+
+```bash
+docker exec thewave-notifications-worker uv run python -m src.admin list
+docker exec thewave-notifications-worker uv run python -m src.admin delete-client <uuid> [--token]
+docker exec thewave-notifications-worker uv run python -m src.admin clear-thresholds
+docker exec thewave-notifications-worker uv run python -m src.admin prune-tokenless [--dry-run]
+```
+
+`clear-thresholds` re-arms every `below_threshold` notification (useful for
+testing delivery). `prune-tokenless` drops notifications whose client has no
+token, and client rows whose token is blank.
+
+## Schema
 
 ```sql
 CREATE TABLE notifications (
     client_id TEXT NOT NULL,
     notification_id TEXT NOT NULL,
     performance_ak TEXT NOT NULL,
-    date TEXT NOT NULL,
-    time TEXT NOT NULL,
+    date TEXT NOT NULL,               -- session date, Europe/London
+    time TEXT NOT NULL,               -- HH:MM, Europe/London
     side TEXT NOT NULL,
     title TEXT NOT NULL,
     notification_type TEXT NOT NULL,
-    thresholds TEXT,  -- JSON array for below_threshold type
-    notified_thresholds TEXT,  -- JSON array of triggered thresholds
+    thresholds TEXT,                  -- JSON array, below_threshold only
+    notified_thresholds TEXT,         -- JSON array of thresholds already sent
     last_checked_availability INTEGER,
-    created_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,         -- naive UTC ISO-8601
+    next_check_at TEXT,               -- 'YYYY-MM-DD HH:MM:SS' UTC
     PRIMARY KEY (client_id, notification_id)
 );
-```
 
-**Indexes:**
-- `idx_performance_ak` on `performance_ak` for efficient queries by performance
-- `idx_date` on `date` for date-based queries
-
-### Clients Table
-
-```sql
 CREATE TABLE clients (
     client_id TEXT PRIMARY KEY,
     fcm_token TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    alias TEXT                        -- set out of band; the dashboard's label
 );
 ```
-
-## Migrating from DynamoDB
-
-If you have existing data in DynamoDB and want to migrate to SQLite, run the migration script:
-
-```bash
-python migrate_to_sqlite.py
-```
-
-This will:
-1. Connect to your existing DynamoDB instance (LocalStack)
-2. Fetch all notifications and client tokens
-3. Create SQLite database tables
-4. Migrate all data to SQLite
-5. Save the database to `data/notifications.db`
-
-**Note**: The migration script does not delete data from DynamoDB. You can safely run it multiple times.
-
-## Development
-
-The project structure:
-
-```
-notifications/
-├── pyproject.toml
-├── src/
-│   ├── api/          # Flask API endpoints
-│   ├── daemon/       # Background daemon service
-│   ├── storage/      # DynamoDB operations
-│   └── utils/        # Calendar API client
-```
-

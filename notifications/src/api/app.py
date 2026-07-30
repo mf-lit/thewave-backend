@@ -1,45 +1,46 @@
-"""Flask application initialization."""
+"""Flask application factory.
+
+Importing this module has no side effects — the process-wide instance lives in
+``src/wsgi.py`` — so tests can build an app against a temporary database and a
+fake calendar without touching the real ones.
+"""
+from __future__ import annotations
+
 import logging
-import sys
+from typing import Optional
 
 from flask import Flask
 
-from src.api.routes import bp
-from src.utils.config import validate_config_file
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
+from ..services import Services
+from ..settings import Settings
+from . import handlers
+from .routes import bp
 
 logger = logging.getLogger(__name__)
 
 
-def create_app() -> Flask:
-    """Create and configure the Flask application."""
-    # Validate config file at startup (unless auth is disabled)
-    try:
-        validate_config_file()
-    except (FileNotFoundError, ValueError) as e:
-        logger.error(f"Configuration validation failed: {e}")
-        sys.exit(1)
-    
+def _check_auth_configured(services: Services) -> None:
+    """Refuse to serve with authentication silently unconfigured."""
+    if services.settings.auth_disabled:
+        logger.warning("API authentication is DISABLED via DISABLE_API_AUTH")
+        return
+
+    keys = services.config.api_keys()
+    if not keys:
+        raise RuntimeError(
+            f"No api_keys found in {services.settings.config_path}. "
+            "Add at least one key, or set DISABLE_API_AUTH=1 to run without auth."
+        )
+    logger.info("Loaded %d API key(s)", len(keys))
+
+
+def create_app(services: Optional[Services] = None, settings: Optional[Settings] = None) -> Flask:
+    """Build the WSGI app. Pass ``services`` to inject fakes in tests."""
+    services = services or Services.build(settings)
+    _check_auth_configured(services)
+
     app = Flask(__name__)
+    app.extensions["notifications"] = services
     app.register_blueprint(bp)
-
-    @app.route("/health")
-    def health():
-        """Health check endpoint."""
-        return {"status": "ok"}, 200
-
+    handlers.register(app)
     return app
-
-
-# Create the application instance for WSGI servers (like gunicorn)
-app = create_app()
-
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5001, debug=True)
-

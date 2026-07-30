@@ -1,9 +1,21 @@
 services:
-  notifications:
+  # The API and the availability worker share one image and one SQLite file
+  # (WAL mode), but run as separate containers so that if either dies, Docker
+  # restarts it. They used to be two background processes behind one bash
+  # entrypoint, where a dead worker left the container "up" and silent.
+  notifications-api:
     build:
       context: ./notifications
       dockerfile: Dockerfile
-    container_name: thewave-notifications
+    container_name: thewave-notifications-api
+    networks:
+      default:
+        aliases:
+          # The Cloudflare tunnel's ingress rules for wave-notifications.vq5.net
+          # and wave-notifications-oci.vq5.net point at http://thewave-notifications:5001,
+          # which used to be this service's container name. The alias keeps that
+          # DNS name resolving so the split needs no change in Cloudflare.
+          - thewave-notifications
     ports:
       - "5001:5001"
     volumes:
@@ -12,9 +24,27 @@ services:
       # Mount data directory for SQLite database persistence
       - /thewave/docker_vols/notifications/data:/app/data
     environment:
-      # Flask environment
-      - FLASK_ENV=production
       - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+
+  notifications-worker:
+    build:
+      context: ./notifications
+      dockerfile: Dockerfile
+    container_name: thewave-notifications-worker
+    command: ["uv", "run", "python", "-m", "src.worker"]
+    volumes:
+      - /thewave/docker_vols/notifications/config:/app/config:ro
+      - /thewave/docker_vols/notifications/data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      # The worker touches this file at the end of every check cycle.
+      test: ["CMD-SHELL", "find /app/data/worker-heartbeat -newermt '-10 minutes' | grep -q ."]
+      interval: 60s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
     restart: unless-stopped
 
   upstream-api:
@@ -63,7 +93,7 @@ services:
       - WIREPUSHER_TYPE=log-alert       # optional, customize in the app under "Types"
       - LOG_PATTERN=error|exception|fatal|panic
       - COOLDOWN=60
-      - CONTAINERS=thewave-notifications thewave-upstream-api          # leave unset to watch all
+      - CONTAINERS=thewave-notifications-api thewave-notifications-worker thewave-upstream-api          # leave unset to watch all
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 

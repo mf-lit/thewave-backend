@@ -1,36 +1,35 @@
 FROM python:3.11-slim
 
-# Install UV package manager
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# Set working directory
 WORKDIR /app
 
-# Copy dependency files
-COPY pyproject.toml uv.lock* ./
+# curl serves the API container's healthcheck.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install dependencies using UV
+COPY pyproject.toml uv.lock* ./
 RUN uv sync --frozen --no-dev
 
-# Copy application code
 COPY src/ ./src/
-# COPY config/ ./config/
 
-# Create data directory for SQLite database
-# RUN mkdir -p data
-
-# Copy startup script
-COPY docker-entrypoint.sh ./
-RUN chmod +x docker-entrypoint.sh
-
-# Expose API port
 EXPOSE 5001
 
-# Set environment variables defaults
-ENV PYTHONUNBUFFERED=1
-ENV CALENDAR_API_URL=http://thewave-upstream-api:5000/calendar
-ENV SQLITE_DB_PATH=data/notifications.db
-ENV FLASK_ENV=production
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    CALENDAR_API_URL=http://thewave-upstream-api:5000/calendar \
+    SQLITE_DB_PATH=data/notifications.db
 
-# Use the startup script as entrypoint
-ENTRYPOINT ["./docker-entrypoint.sh"]
+# One image, two entry points: this is the API, and the worker service
+# overrides it with `command:`. Neither process supervises the other any
+# more — that is the container runtime's job.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -fsS http://localhost:5001/health || exit 1
+
+CMD ["uv", "run", "gunicorn", \
+     "--workers", "2", \
+     "--bind", "0.0.0.0:5001", \
+     "--access-logfile", "-", \
+     "--error-logfile", "-", \
+     "src.wsgi:app"]

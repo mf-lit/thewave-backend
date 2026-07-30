@@ -1,8 +1,11 @@
-# API Keys Configuration
-# Copy this file to config.yaml and add your actual API keys
-# The config.yaml file is gitignored and should not be committed
+# Copy to config.yaml (gitignored) and fill in.
+# Edits are picked up without restarting the service.
 
+# Keys clients present as the x-api-key header. Any one of them is accepted.
 api_keys:
   - "your-api-key-1-here"
   - "your-api-key-2-here"
-  # Add more API keys as needed
+
+# Key this service presents to the upstream calendar API.
+# Overridden by the CALENDAR_API_KEY environment variable if set.
+calendar_api_key: "upstream-api-key-here"
