@@ -43,19 +43,23 @@ curl -s 'localhost:5002/api/clients/new?granularity=day' | head
 - `notifications.thresholds` / `notified_thresholds` are JSON arrays stored as TEXT — parse with
   `_parse_json_list` in `queries.py`.
 
-## Active-clients chart: end-of-day snapshots
+## Active-clients chart: rolling snapshots
 
 `last_seen` only stores each client's *most recent* day, so a live "active per day" count is wrong
-for past days. Fix: a nightly snapshot freezes each completed day's active set.
+for past days — and visibly decays through the day as clients return. Fix: an hourly snapshot
+freezes each day's active set as it happens.
 
 - **Store** (`config.DAILY_ACTIVE_DB_PATH`, default `data/daily_active.db`, dashboard-owned,
   writable, git-ignored): `daily_active(date, client_id, is_cloud)` + `snapshot_runs(date,
   computed_at, client_count)`. Per-client rows (not a bare count) so week/month stay correct
   (distinct users) and the cloud toggle works on history.
 - **Snapshot script** `scripts/snapshot_active.py` records, for a UTC day, every client whose
-  `last_seen` is that day (with `is_cloud` via reverse DNS). Idempotent per date; `--date` for
-  manual/backfill. Run by cron just before **UTC** midnight (`CRON_TZ=UTC 55 23`), via
-  `uv run --directory <repo> python scripts/snapshot_active.py`.
+  `last_seen` is that day (with `is_cloud` via reverse DNS). Rows accumulate, so a run only ever
+  *adds* clients to a day; `--date` for manual/backfill, `--replace` to rebuild a day from scratch
+  (destructive — it discards clients whose `last_seen` has since moved on). Run hourly by cron
+  (`5 * * * *`) over **yesterday and today**: re-doing yesterday is what captures clients active in
+  the last minutes before midnight, which a single end-of-day run structurally missed. Cron pings
+  healthchecks.io on success — this job once died silently for 8 days.
 - **Merge** in `queries.active_clients_by_period` (used by `/api/clients/active`): `db.upstream(
   attach_active=True)` attaches the store as `hist`; a UNION counts DISTINCT clients per period from
   hist (completed days, `date < date('now')`) + live `clients` (today, or any day not in
