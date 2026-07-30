@@ -67,6 +67,13 @@ PACKAGES=(
   p7zip p7zip-plugins gcc make zip unzip moreutils tmux restic sqlite
   # Tailscale mesh VPN (join the tailnet manually with `tailscale up --ssh`)
   tailscale
+  # Playwright/Chromium runtime libs for price-scraper (Ubuntu apt names ->
+  # OL9/dnf, per Playwright's own install-deps hint on Debian-based hosts):
+  # libatk1.0-0t64, libatk-bridge2.0-0t64, libcups2t64, libxkbcommon0,
+  # libasound2t64, libgbm1, libxcomposite1, libxdamage1, libxfixes3,
+  # libxrandr2, libatspi2.0-0t64
+  atk at-spi2-atk cups-libs libxkbcommon alsa-lib mesa-libgbm libXcomposite
+  libXdamage libXfixes libXrandr at-spi2-core
 )
 
 ensure_packages() {
