@@ -87,56 +87,153 @@ def _store_weather_in_cache(water_temp: float, air_temp: float, conditions: str,
     }
 
 
-def get_wave_weather() -> tuple[float, float, str]:
+SITE_URL = "https://www.thewave.com/"
+# The site's own weather endpoint, referenced by the homepage's client-side
+# state. Returns the same values the page renders, without the markup.
+WEATHER_API_URL = "https://www.thewave.com/wp-json/wave/v1/weather"
+
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36"
+}
+
+
+def _parse_temp(value: str, label: str) -> float:
     """
-    Fetch water temperature, air temperature, and weather conditions from the website by scraping.
-    
+    Pull a temperature out of a string such as "24.1°C" or " 20 ".
+
+    Args:
+        value: Raw text containing the temperature
+        label: Name of the field, used in the error message
+
     Returns:
-        tuple[float, float, str]: (water_temp, air_temp, conditions)
+        float: The parsed temperature
+
+    Raises:
+        ValueError: If no number is present in the text
     """
-    url = "https://www.thewave.com/"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36"
-    }
-    
-    logger.info("Scraping weather data from website")
+    match = re.search(r"-?\d+(?:\.\d+)?", value or "")
+    if not match:
+        raise ValueError(f"Could not parse {label} from {value!r}")
+    return float(match.group())
+
+
+def _get_with_retries(url: str) -> requests.Response:
+    """
+    GET a URL, retrying on connection-level failures.
+
+    Args:
+        url: URL to fetch
+
+    Returns:
+        requests.Response: The successful response
+    """
     max_retries = 2
     for attempt in range(max_retries + 1):
         try:
-            response = requests.get(url, headers=headers, timeout=15)
+            response = requests.get(url, headers=_HEADERS, timeout=15)
             response.raise_for_status()
-            break
+            return response
         except (requests.exceptions.ProxyError, requests.exceptions.ConnectionError) as e:
             if attempt < max_retries:
                 log = logger.debug if attempt == 0 else logger.warning
-                log(f"Weather scrape connection error (attempt {attempt + 1}/{max_retries + 1}), retrying in 3s: {e}")
+                log(f"Weather fetch connection error (attempt {attempt + 1}/{max_retries + 1}), retrying in 3s: {e}")
                 time.sleep(3)
             else:
                 raise
-    
+    raise AssertionError("unreachable")
+
+
+def _weather_from_api() -> tuple[float, float, str]:
+    """
+    Fetch weather from the site's JSON weather endpoint.
+
+    Returns:
+        tuple[float, float, str]: (water_temp, air_temp, conditions)
+
+    Raises:
+        ValueError: If the payload is missing the fields we need
+    """
+    response = _get_with_retries(WEATHER_API_URL)
+    try:
+        payload = response.json()
+    except ValueError as e:
+        raise ValueError(f"Weather endpoint did not return JSON: {e}")
+
+    if not isinstance(payload, dict):
+        raise ValueError(f"Weather endpoint returned unexpected payload type: {type(payload).__name__}")
+
+    water_temp = _parse_temp(payload.get("waterTemp", ""), "water temperature")
+
+    current = payload.get("current") or {}
+    air_temp = _parse_temp(current.get("temp", ""), "air temperature")
+
+    conditions = (current.get("description") or "").strip().rstrip(" &")
+    if not conditions:
+        raise ValueError("Weather endpoint returned no conditions description")
+
+    return water_temp, air_temp, conditions
+
+
+def _weather_from_page() -> tuple[float, float, str]:
+    """
+    Fetch weather by scraping the homepage. Fallback for when the JSON
+    endpoint is unavailable.
+
+    The values sit in a block of sibling <p> tags — conditions, then air
+    temperature, then water temperature — where the numbers are wrapped in
+    <span data-wp-text="..."> bindings. That nesting means the <p> tags have
+    mixed content, so they must be matched on their full text rather than with
+    BeautifulSoup's `string=` filter, which only matches single-string tags.
+
+    Returns:
+        tuple[float, float, str]: (water_temp, air_temp, conditions)
+
+    Raises:
+        ValueError: If the expected markup is not present
+    """
+    response = _get_with_retries(SITE_URL)
     soup = bs.BeautifulSoup(response.content, "html5lib")
-    marker = soup.find("p", string=re.compile("Water:.*"))
-    
+
+    marker = soup.find(
+        lambda tag: tag.name == "p" and tag.get_text().strip().startswith("Water:")
+    )
     if not marker:
         raise ValueError("Could not find water temperature marker on page")
-    
-    water_temp = float(re.sub("[^0-9.]", "", marker.text.strip()))
-    logger.info(f"Water temperature scraped: {water_temp}")
+    water_temp = _parse_temp(marker.get_text(), "water temperature")
 
-    try:
-        air_temp_element = marker.find_previous("p")
-    except AttributeError:
+    air_temp_element = marker.find_previous("p")
+    if air_temp_element is None:
         raise ValueError("Could not find air temperature marker on page")
-    air_temp = float(re.sub("[^0-9.]", "", air_temp_element.text.strip()))
-    logger.info(f"Air temperature scraped: {air_temp}")
-    
-    try:
-        conditions_element = air_temp_element.find_previous("p")
-    except AttributeError:
-        raise ValueError("Could not find conditions marker on page")
+    air_temp = _parse_temp(air_temp_element.get_text(), "air temperature")
 
-    conditions = conditions_element.text.strip().rstrip(" &")
-    logger.info(f"Conditions scraped: {conditions}")
+    conditions_element = air_temp_element.find_previous("p")
+    if conditions_element is None:
+        raise ValueError("Could not find conditions marker on page")
+    conditions = conditions_element.get_text().strip().rstrip(" &")
+
+    return water_temp, air_temp, conditions
+
+
+def get_wave_weather() -> tuple[float, float, str]:
+    """
+    Fetch water temperature, air temperature, and weather conditions from the site.
+
+    Prefers the site's JSON weather endpoint and falls back to scraping the
+    homepage if that endpoint fails.
+
+    Returns:
+        tuple[float, float, str]: (water_temp, air_temp, conditions)
+    """
+    logger.info("Fetching weather data from weather endpoint")
+    try:
+        water_temp, air_temp, conditions = _weather_from_api()
+    except (requests.exceptions.RequestException, ValueError) as e:
+        logger.warning(f"Weather endpoint failed ({e}), falling back to page scrape")
+        water_temp, air_temp, conditions = _weather_from_page()
+
+    logger.info(f"Water temperature: {water_temp}")
+    logger.info(f"Air temperature: {air_temp}")
+    logger.info(f"Conditions: {conditions}")
 
     return water_temp, air_temp, conditions
 
