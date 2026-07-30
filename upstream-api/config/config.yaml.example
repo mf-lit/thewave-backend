@@ -13,3 +13,12 @@ api_keys:
 # Can be an absolute path or relative to the project root
 # history_dir: /path/to/history
 # history_dir: custom/history
+
+# Optional: Force clients on an outdated OS/version to see "App Upgrade Required"
+# in place of every calendar session title, instead of the real titles.
+# Keys are OS names (matched case-insensitively against the X-Client-OS header),
+# values are the minimum version string (dot-separated integers) required.
+# Can also be set via MIN_CLIENT_VERSIONS env var (JSON object, takes precedence).
+# min_client_versions:
+#   ios: "2.3.0"
+#   android: "2.4.0"

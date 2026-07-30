@@ -25,6 +25,7 @@ from src.core.performance_price import add_prices_to_performances
 from src.core.weather_forecast import add_weather_to_performances
 from src.core.auth import load_api_keys, require_api_key
 from src.core.client_tracker import init_client_tracking, track_client
+from src.core.version_gate import load_min_client_versions, apply_upgrade_gate
 from src.core.weather import (
     get_cached_weather,
     fetch_and_cache_weather
@@ -88,6 +89,9 @@ except ValueError as e:
 
 # Initialize client tracking table
 init_client_tracking()
+
+# Load minimum client versions for the app-upgrade nag (from env var or config.yaml)
+load_min_client_versions()
 
 # Load upstream API URL at startup (from env var, config.yaml, or default)
 load_upstream_api_url()
@@ -263,6 +267,7 @@ def _fetch_current_days(date_from, number_of_days_str, number_of_days, refresh):
     response_data = add_floodlights_to_performances(response_data)
     response_data = add_prices_to_performances(response_data)
     response_data = add_weather_to_performances(response_data)
+    response_data = apply_upgrade_gate(response_data, request.headers.get("X-Client-OS"), request.headers.get("X-Client-Version"))
     return jsonify(_format_response_with_expires(response_data, expires))
 
 
@@ -302,6 +307,7 @@ def calendar_endpoint():
             response_data = add_temperature_to_performances(response_data)
             response_data = add_floodlights_to_performances(response_data)
             response_data = add_prices_to_performances(response_data)
+            response_data = apply_upgrade_gate(response_data, request.headers.get("X-Client-OS"), request.headers.get("X-Client-Version"))
             expires = time.time() + 3600
             return jsonify(_format_response_with_expires(response_data, expires))
         except (FileNotFoundError, json.JSONDecodeError) as e:
@@ -360,6 +366,7 @@ def calendar_endpoint():
     combined = {"days": history_days + upstream_days}
     if "_warnings" in history_data:
         combined["_warnings"] = history_data["_warnings"]
+    combined = apply_upgrade_gate(combined, request.headers.get("X-Client-OS"), request.headers.get("X-Client-Version"))
     return jsonify(_format_response_with_expires(combined, future_expires))
 
 
