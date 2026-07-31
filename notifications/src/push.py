@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Protocol, Tuple
 
-from .models import ABOVE_ZERO, Notification
+from .models import ABOVE_ZERO, QUIET_SESSION, Notification
 from .repository import ClientRepository
 
 logger = logging.getLogger(__name__)
@@ -74,6 +74,8 @@ def display_strings(notification: Notification, availability: int) -> Tuple[str,
     )
     if notification.notification_type == ABOVE_ZERO:
         body = "A session has become available"
+    elif notification.notification_type == QUIET_SESSION:
+        body = f"Quiet session: {availability} slots remaining on the {notification.side}"
     else:
         body = f"Availability dropped to {availability} on the {notification.side}"
     return title, body
@@ -92,7 +94,14 @@ def data_payload(
         "availability": str(availability),
         "notification_type": str(notification.notification_type or ""),
         "notification_id": str(notification.notification_id or ""),
+        # `threshold` is the seat count at or *below* which below_threshold
+        # fires; `minimum_slots` is the count at or *above* which quiet_session
+        # does. Opposite senses, so they stay separate keys rather than one
+        # whose meaning the app would have to infer from notification_type.
         "threshold": str(threshold) if threshold is not None else "",
+        "minimum_slots": (
+            "" if notification.minimum_slots is None else str(notification.minimum_slots)
+        ),
     }
 
 

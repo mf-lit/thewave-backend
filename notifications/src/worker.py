@@ -18,7 +18,7 @@ from typing import Optional
 
 from . import clock, evaluator, scheduling
 from .calendar_client import CalendarData, CalendarError, availability_for_side
-from .models import BELOW_THRESHOLD, Notification
+from .models import BELOW_THRESHOLD, QUIET_SESSION, Notification, duration_hours
 from .services import Services
 from .settings import configure_logging
 
@@ -26,6 +26,21 @@ logger = logging.getLogger(__name__)
 
 MIN_SLEEP_SECONDS = 30
 MAX_SLEEP_SECONDS = 60
+
+# How long a quiet_session keeps retrying for usable calendar data before it is
+# abandoned — ten attempts at FALLBACK_MINUTES. Its check is only meaningful
+# near the moment it was scheduled for: "starting soon, and quiet" delivered
+# hours late describes a seat count that no longer means what the user asked
+# about, and the push carries no reading time for the app to notice.
+QUIET_GRACE_MINUTES = 30
+
+
+def _parse_created_at(value: Optional[str]) -> Optional[datetime]:
+    """Read a stored ``created_at``, which is naive UTC ISO-8601."""
+    try:
+        return datetime.fromisoformat(value).replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
 
 
 class Worker:
@@ -80,33 +95,38 @@ class Worker:
             # Previously this left next_check_at untouched, so a performance
             # that vanished from the calendar was re-fetched every cycle
             # forever. Back off to the shortest normal interval instead.
-            logger.warning(
-                "Performance %s not in calendar data; retrying in %d minutes",
-                notification.performance_ak,
-                scheduling.FALLBACK_MINUTES,
+            self._back_off(
+                notification,
+                f"Performance {notification.performance_ak} not in calendar data",
             )
-            repository.reschedule(notification, self._next_check(scheduling.FALLBACK_MINUTES))
             return
 
         availability = availability_for_side(performance, notification.side)
         if availability is None:
-            logger.warning(
-                "No '%s' side on performance %s; retrying in %d minutes",
-                notification.side,
-                notification.performance_ak,
-                scheduling.FALLBACK_MINUTES,
+            self._back_off(
+                notification,
+                f"No '{notification.side}' side on performance "
+                f"{notification.performance_ak}",
             )
-            repository.reschedule(notification, self._next_check(scheduling.FALLBACK_MINUTES))
             return
 
-        minutes = scheduling.interval_minutes(
-            availability, clock.session_start(notification.date, notification.time)
-        )
+        if notification.notification_type == QUIET_SESSION:
+            # Checked once, at time_before. Parking it past the session start
+            # means it can never come due again before the branch above deletes
+            # it, so no "already fired" column is needed.
+            next_check_at = self._retire_at(notification)
+        else:
+            next_check_at = self._next_check(
+                scheduling.interval_minutes(
+                    availability, clock.session_start(notification.date, notification.time)
+                )
+            )
+
         decision = evaluator.evaluate(notification, availability)
 
         # Record the reading first: `decision` was taken against the previous
         # value, and this must not be lost if the push itself fails.
-        repository.record_check(notification, availability, self._next_check(minutes))
+        repository.record_check(notification, availability, next_check_at)
 
         if not decision.notify:
             return
@@ -127,6 +147,51 @@ class Worker:
     @staticmethod
     def _next_check(minutes: int) -> str:
         return clock.utc_stamp(clock.now_utc() + timedelta(minutes=minutes))
+
+    def _retire_at(self, notification: Notification) -> str:
+        """Where a finished quiet_session waits to be deleted."""
+        return clock.just_after_start(notification.date, notification.time) or self._next_check(
+            scheduling.FALLBACK_MINUTES
+        )
+
+    def _back_off(self, notification: Notification, reason: str) -> None:
+        """Reschedule after a cycle that produced no usable seat count.
+
+        A quiet_session gets only one meaningful check, so rather than retrying
+        until the session starts it is abandoned once its window has passed.
+        """
+        if notification.notification_type == QUIET_SESSION and self._quiet_window_closed(
+            notification
+        ):
+            logger.warning(
+                "%s; abandoning quiet_session %s, its check window has passed",
+                reason,
+                notification.notification_id,
+            )
+            self.services.notifications.reschedule(notification, self._retire_at(notification))
+            return
+
+        logger.warning("%s; retrying in %d minutes", reason, scheduling.FALLBACK_MINUTES)
+        self.services.notifications.reschedule(
+            notification, self._next_check(scheduling.FALLBACK_MINUTES)
+        )
+
+    @staticmethod
+    def _quiet_window_closed(notification: Notification, now: Optional[datetime] = None) -> bool:
+        """Whether a quiet_session has waited too long for usable data."""
+        fire_at = clock.hours_before(
+            notification.date, notification.time, duration_hours(notification.time_before)
+        )
+        if fire_at is None:
+            return False
+
+        start = datetime.strptime(fire_at, clock.STAMP_FORMAT).replace(tzinfo=timezone.utc)
+        # A notification created inside its own window was never going to be
+        # checked at the nominal time, so the grace runs from creation instead.
+        created = _parse_created_at(notification.created_at)
+        if created is not None and created > start:
+            start = created
+        return (now or clock.now_utc()) > start + timedelta(minutes=QUIET_GRACE_MINUTES)
 
     # -- loop -------------------------------------------------------------
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 
 from src.evaluator import evaluate
-from src.models import ABOVE_ZERO, BELOW_THRESHOLD, Notification
+from src.models import ABOVE_ZERO, BELOW_THRESHOLD, QUIET_SESSION, Notification
 
 
 def notification(**overrides) -> Notification:
@@ -106,3 +106,46 @@ def test_above_zero_rearms_after_selling_out_again():
 @pytest.mark.parametrize("notification_type", ["something_else", ""])
 def test_unknown_type_never_notifies(notification_type):
     assert evaluate(notification(notification_type=notification_type), 0).notify is False
+
+
+# -- quiet_session ------------------------------------------------------------
+
+def quiet(**overrides):
+    fields = dict(
+        notification_type=QUIET_SESSION, thresholds=None, minimum_slots=12, time_before="24h"
+    )
+    fields.update(overrides)
+    return notification(**fields)
+
+
+def test_quiet_session_fires_when_enough_slots_remain():
+    decision = evaluate(quiet(), 20)
+    assert decision.notify
+    assert decision.message == "Session is quiet: 20 slots remaining (minimum 12)"
+
+
+def test_quiet_session_leaves_the_threshold_field_alone():
+    """`threshold` means 'at or below', which is not what this type tests."""
+    assert evaluate(quiet(), 20).threshold is None
+
+
+def test_quiet_session_fires_at_exactly_the_minimum():
+    assert evaluate(quiet(), 12).notify is True
+
+
+def test_quiet_session_stays_silent_when_the_session_is_filling_up():
+    assert evaluate(quiet(), 11).notify is False
+
+
+def test_quiet_session_never_fires_twice():
+    """A stored reading means the single check has already happened."""
+    assert evaluate(quiet(last_checked_availability=20), 20).notify is False
+
+
+def test_quiet_session_without_a_minimum_never_notifies():
+    """A malformed row must return a decision, not raise into the check cycle."""
+    assert evaluate(quiet(minimum_slots=None), 20).notify is False
+
+
+def test_a_zero_minimum_fires_on_any_availability():
+    assert evaluate(quiet(minimum_slots=0), 0).notify is True

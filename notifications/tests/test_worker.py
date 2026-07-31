@@ -1,8 +1,11 @@
 """The check cycle."""
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
+from src import clock
 from src.calendar_client import CalendarError
 from src.models import NotificationRequest
 from src.push import PushError
@@ -265,3 +268,159 @@ def test_run_forever_stops_when_the_event_is_set(worker):
     stop = threading.Event()
     stop.set()
     worker.run_forever(stop)  # returns immediately rather than sleeping
+
+
+# -- quiet_session ------------------------------------------------------------
+
+def add_quiet(services, date=FUTURE, **overrides):
+    fields = {
+        "notification_type": "quiet_session",
+        "minimum_slots": 12,
+        "time_before": "24h",
+    }
+    fields.update(overrides)
+    return add(services, date=date, **fields)
+
+
+def test_a_quiet_session_is_not_checked_before_its_window_opens(
+    worker, services, sender, stocked_calendar, calendar
+):
+    stocked_calendar({"right": 20})
+    services.clients.upsert_token("client-1", VALID_TOKEN)
+    add_quiet(services)
+
+    worker.run_once()
+
+    assert calendar.requested_dates == []
+    assert sender.sent == []
+
+
+def test_a_quiet_session_pushes_once_its_check_comes_due(
+    worker, services, sender, stocked_calendar
+):
+    stocked_calendar({"right": 20})
+    services.clients.upsert_token("client-1", VALID_TOKEN)
+    notification = add_quiet(services)
+    services.notifications.reschedule(notification, "2000-01-01 00:00:00")
+
+    worker.run_once()
+
+    assert len(sender.sent) == 1
+    assert sender.sent[0].body == "Quiet session: 20 slots remaining on the right"
+    assert sender.sent[0].data["minimum_slots"] == "12"
+    assert sender.sent[0].data["threshold"] == ""
+
+
+def test_a_busy_session_is_checked_but_not_pushed(
+    worker, services, sender, stocked_calendar
+):
+    stocked_calendar({"right": 4})
+    services.clients.upsert_token("client-1", VALID_TOKEN)
+    notification = add_quiet(services)
+    services.notifications.reschedule(notification, "2000-01-01 00:00:00")
+
+    worker.run_once()
+
+    assert sender.sent == []
+    assert stored(services, notification).last_checked_availability == 4
+
+
+def test_a_quiet_session_is_retired_after_its_single_check(
+    worker, services, stocked_calendar
+):
+    """Parked past the session start, where the deletion branch collects it."""
+    stocked_calendar({"right": 20})
+    notification = add_quiet(services)
+    services.notifications.reschedule(notification, "2000-01-01 00:00:00")
+
+    worker.run_once()
+
+    # 18:00 on 2027-08-05 is BST, i.e. 17:00 UTC, plus the retire minute.
+    assert stored(services, notification).next_check_at == "2027-08-05 17:01:00"
+
+
+def test_a_quiet_session_never_pushes_twice(worker, services, sender, stocked_calendar):
+    """Even forced back to due repeatedly, the reading is what stops it."""
+    stocked_calendar({"right": 20})
+    services.clients.upsert_token("client-1", VALID_TOKEN)
+    notification = add_quiet(services)
+
+    for _ in range(3):
+        services.notifications.reschedule(notification, "2000-01-01 00:00:00")
+        worker.run_once()
+
+    assert len(sender.sent) == 1
+
+
+def test_a_retired_quiet_session_is_deleted_once_the_session_starts(
+    worker, services, stocked_calendar
+):
+    stocked_calendar({"right": 20}, date=PAST)
+    notification = add_quiet(services, date=PAST)
+    services.notifications.reschedule(notification, "2000-01-01 00:00:00")
+
+    worker.run_once()
+    assert stored(services, notification) is None
+
+
+def freeze_after_check_time(monkeypatch, minutes: int) -> None:
+    """Pin the clock ``minutes`` past a FUTURE quiet_session's intended check."""
+    fire_at = clock.hours_before(FUTURE, "18:00", 24)
+    moment = datetime.strptime(fire_at, clock.STAMP_FORMAT).replace(
+        tzinfo=timezone.utc
+    ) + timedelta(minutes=minutes)
+    monkeypatch.setattr(clock, "now_utc", lambda: moment)
+
+
+def test_a_quiet_session_still_retries_inside_its_grace_window(
+    worker, services, calendar, monkeypatch
+):
+    """A transient calendar gap right at the check time is worth retrying."""
+    calendar.days = [make_day(FUTURE, [make_performance(performance_ak="OTHER")])]
+    notification = add_quiet(services)
+    services.notifications.reschedule(notification, "2000-01-01 00:00:00")
+    freeze_after_check_time(monkeypatch, 5)
+
+    worker.run_once()
+
+    assert stored(services, notification).next_check_at == "2027-08-04 17:08:00"
+
+
+def test_a_quiet_session_gives_up_on_a_performance_that_stays_missing(
+    worker, services, sender, calendar, monkeypatch
+):
+    """Its one check is only meaningful near the moment it was scheduled for.
+
+    Left retrying, a 'starting soon, and quiet' push could arrive hours late
+    against a seat count that no longer means what the user asked about.
+    """
+    calendar.days = [make_day(FUTURE, [make_performance(performance_ak="OTHER")])]
+    services.clients.upsert_token("client-1", VALID_TOKEN)
+    notification = add_quiet(services)
+    services.notifications.reschedule(notification, "2000-01-01 00:00:00")
+    freeze_after_check_time(monkeypatch, 31)
+
+    worker.run_once()
+
+    assert sender.sent == []
+    assert stored(services, notification).next_check_at == "2027-08-05 17:01:00"
+
+
+def test_a_quiet_session_gives_up_when_its_side_stops_being_sold(
+    worker, services, calendar, monkeypatch
+):
+    calendar.days = [
+        make_day(FUTURE, [make_performance(performance_ak=AK, availability={"left": 9})])
+    ]
+    notification = add_quiet(services)
+    services.notifications.reschedule(notification, "2000-01-01 00:00:00")
+    freeze_after_check_time(monkeypatch, 31)
+
+    worker.run_once()
+
+    assert stored(services, notification).next_check_at == "2027-08-05 17:01:00"
+
+
+def test_a_far_future_quiet_session_does_not_change_the_sleep_bounds(worker, services):
+    add_quiet(services)
+    assert 30 <= worker.seconds_until_next_cycle() <= 60

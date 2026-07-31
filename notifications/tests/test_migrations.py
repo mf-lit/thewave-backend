@@ -43,6 +43,21 @@ def columns(database: Database, table: str) -> set:
     return {row["name"] for row in database.connection().execute(f"PRAGMA table_info({table})")}
 
 
+def rows_preserved(before: list, after: list) -> bool:
+    """Whether every column that existed before still holds its original value.
+
+    Compared column by column rather than whole-row, because an additive
+    migration is allowed to introduce a new key — that is the only kind we
+    permit — but never to disturb one that was already there.
+    """
+    if len(before) != len(after):
+        return False
+    return all(
+        {name: dict(row)[name] for name in original} == original
+        for original, row in zip((dict(r) for r in before), after)
+    )
+
+
 # -- a fresh install ----------------------------------------------------------
 
 def test_an_empty_file_is_bootstrapped(tmp_path):
@@ -115,7 +130,7 @@ def test_legacy_schema_migrates_without_touching_rows(tmp_path):
     assert migrations.apply(database) == migrations.LATEST_VERSION
     after = database.connection().execute("SELECT * FROM notifications").fetchall()
 
-    assert [dict(row) for row in after] == [dict(row) for row in before]
+    assert rows_preserved(before, after)
 
 
 def test_an_out_of_band_column_survives(tmp_path):
@@ -183,6 +198,18 @@ def test_production_snapshot_survives_migration(tmp_path):
 
     assert len(after_notifications) == len(before_notifications)
     assert len(after_clients) == len(before_clients)
-    assert after_notifications == before_notifications
-    assert after_clients == before_clients
+    assert rows_preserved(before_notifications, after_notifications)
+    assert rows_preserved(before_clients, after_clients)
     assert DASHBOARD_COLUMNS <= columns(database, "notifications")
+
+
+def test_a_database_predating_time_before_gains_the_column(tmp_path):
+    database = legacy_database(tmp_path / "legacy.db")
+    before = database.connection().execute("SELECT * FROM notifications").fetchall()
+
+    migrations.apply(database)
+
+    assert "time_before" in columns(database, "notifications")
+    after = database.connection().execute("SELECT * FROM notifications").fetchall()
+    assert rows_preserved(before, after)
+    assert after[0]["time_before"] is None

@@ -15,7 +15,7 @@ was and past sessions lingered before being deleted.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -24,6 +24,12 @@ LONDON = ZoneInfo("Europe/London")
 SESSION_FORMAT = "%Y-%m-%d %H:%M"
 DATE_FORMAT = "%Y-%m-%d"
 STAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+# How far past a session's start a retired notification is parked. `due()`
+# selects on ``next_check_at <= now`` while `is_past` tests ``start < now``, so
+# parking on the start itself leaves a one-second window in which a row is due
+# but not yet past, and would be processed once more.
+RETIRE_MINUTES = 1
 
 
 def now_utc() -> datetime:
@@ -51,6 +57,31 @@ def is_past(date_str: str, time_str: str, now: Optional[datetime] = None) -> boo
     if start is None:
         return False
     return start < (now or now_utc())
+
+
+def hours_before(date_str: str, time_str: str, hours: Optional[int]) -> Optional[str]:
+    """UTC stamp ``hours`` real hours before a session starts.
+
+    The subtraction happens after converting to UTC, deliberately. Doing it on
+    the London-local value is wall-clock arithmetic: zoneinfo re-derives the
+    offset at the resulting wall time, so a 48h window spanning a DST change
+    would come out an hour short or long.
+
+    Returns None when the session or the duration can't be read, so callers can
+    fall back the same way `scheduling.interval_minutes` already does.
+    """
+    start = session_start(date_str, time_str)
+    if start is None or hours is None:
+        return None
+    return utc_stamp(start.astimezone(timezone.utc) - timedelta(hours=hours))
+
+
+def just_after_start(date_str: str, time_str: str) -> Optional[str]:
+    """UTC stamp a minute past session start — where a retired row is parked."""
+    start = session_start(date_str, time_str)
+    if start is None:
+        return None
+    return utc_stamp(start.astimezone(timezone.utc) + timedelta(minutes=RETIRE_MINUTES))
 
 
 def utc_now_iso() -> str:

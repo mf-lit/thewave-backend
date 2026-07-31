@@ -9,7 +9,7 @@ import logging
 
 import pytest
 
-from src.models import ABOVE_ZERO, BELOW_THRESHOLD, Notification
+from src.models import ABOVE_ZERO, BELOW_THRESHOLD, QUIET_SESSION, Notification
 from src.push import (
     Notifier,
     PushError,
@@ -74,6 +74,31 @@ def test_above_zero_display_strings():
     assert body == "A session has become available"
 
 
+def test_quiet_session_display_strings():
+    """Without its own branch this would inherit the below_threshold wording."""
+    title, body = display_strings(notification(notification_type=QUIET_SESSION), 12)
+    assert title == "Advanced Surf: 5th Jan at 18:00"
+    assert body == "Quiet session: 12 slots remaining on the right"
+
+
+def test_quiet_session_sends_its_minimum_in_its_own_key():
+    """`threshold` fires at or below; this fires at or above. Separate keys."""
+    payload = data_payload(
+        notification(notification_type=QUIET_SESSION, minimum_slots=12), 20, None
+    )
+    assert payload["notification_type"] == "quiet_session"
+    assert payload["minimum_slots"] == "12"
+    assert payload["threshold"] == ""
+    assert payload["availability"] == "20"
+
+
+def test_a_zero_minimum_is_not_confused_with_an_absent_one():
+    absent = data_payload(notification(), 3, 5)
+    zero = data_payload(notification(notification_type=QUIET_SESSION, minimum_slots=0), 3, None)
+    assert absent["minimum_slots"] == ""
+    assert zero["minimum_slots"] == "0"
+
+
 def test_untitled_session_falls_back():
     title, _ = display_strings(notification(title=""), 1)
     assert title == "Session: 5th Jan at 18:00"
@@ -91,6 +116,7 @@ def test_data_payload_keys_and_types():
         "notification_type": "below_threshold",
         "notification_id": "notif-1",
         "threshold": "5",
+        "minimum_slots": "",
     }
     assert all(isinstance(value, str) for value in payload.values())
 

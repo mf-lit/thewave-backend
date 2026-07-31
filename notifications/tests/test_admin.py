@@ -103,3 +103,21 @@ def test_prune_removes_client_rows_with_empty_tokens(services):
 def test_a_command_is_required():
     with pytest.raises(SystemExit):
         admin.build_parser().parse_args([])
+
+
+def test_list_shows_the_sense_of_each_trigger(services, capsys):
+    """The two types compare in opposite directions; the bare numbers would
+    read as each other's opposite in a shared column."""
+    add(services, "c1", notification_type="below_threshold", thresholds=[5, 2])
+    add(services, "c1", notification_type="quiet_session", minimum_slots=12, time_before="24h")
+
+    run(services, ["list"])
+    output = capsys.readouterr().out
+    assert "<=5,2" in output
+    assert ">=12" in output
+
+
+def test_list_shows_a_dash_when_nothing_triggers_on_a_count(services, capsys):
+    add(services, "c1")  # above_zero
+    run(services, ["list"])
+    assert "FIRES AT" in capsys.readouterr().out

@@ -14,14 +14,21 @@ from typing import Iterable, List, Optional, Sequence
 
 from . import clock
 from .db import Database
-from .models import BELOW_THRESHOLD, Notification, NotificationRequest
+from .models import (
+    BELOW_THRESHOLD,
+    QUIET_SESSION,
+    Notification,
+    NotificationRequest,
+    duration_hours,
+)
 
 logger = logging.getLogger(__name__)
 
 _SELECT = """
 SELECT client_id, notification_id, performance_ak, date, time, side, title,
        notification_type, thresholds, notified_thresholds,
-       last_checked_availability, next_check_at, created_at
+       last_checked_availability, next_check_at, created_at,
+       minimum_slots, time_before
 FROM notifications
 """
 
@@ -34,6 +41,7 @@ class NotificationRepository:
         notification_id = str(uuid.uuid4())
         created_at = clock.utc_now_iso()
         is_threshold = request.notification_type == BELOW_THRESHOLD
+        next_check_at = self._first_check_at(request)
 
         with self.db.transaction() as conn:
             conn.execute(
@@ -41,8 +49,9 @@ class NotificationRepository:
                 INSERT INTO notifications (
                     client_id, notification_id, performance_ak, date, time, side,
                     title, notification_type, thresholds, notified_thresholds,
-                    last_checked_availability, next_check_at, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)
+                    last_checked_availability, next_check_at, created_at,
+                    minimum_slots, time_before
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
                 """,
                 (
                     client_id,
@@ -55,7 +64,10 @@ class NotificationRepository:
                     request.notification_type,
                     json.dumps(request.thresholds) if is_threshold else None,
                     json.dumps([]) if is_threshold else None,
+                    next_check_at,
                     created_at,
+                    request.minimum_slots,
+                    request.time_before,
                 ),
             )
 
@@ -71,6 +83,24 @@ class NotificationRepository:
             created_at=created_at,
             thresholds=list(request.thresholds) if is_threshold else None,
             notified_thresholds=[] if is_threshold else [],
+            next_check_at=next_check_at,
+            minimum_slots=request.minimum_slots,
+            time_before=request.time_before,
+        )
+
+    @staticmethod
+    def _first_check_at(request: NotificationRequest) -> Optional[str]:
+        """When the worker should first look at this notification.
+
+        None for the types that are polled continuously — they are due at once.
+        A quiet_session is instead checked a single time, ``time_before`` the
+        session starts; a stamp already in the past is fine and simply means it
+        is due on the next cycle.
+        """
+        if request.notification_type != QUIET_SESSION:
+            return None
+        return clock.hours_before(
+            request.date, request.time, duration_hours(request.time_before)
         )
 
     def list_for_client(self, client_id: str) -> List[Notification]:

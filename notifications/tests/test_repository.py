@@ -231,3 +231,60 @@ def test_repositories_can_be_built_independently(services):
 
     assert services.notifications.get("c1", created.notification_id) is not None
     assert services.clients.get_token("c1") == VALID_TOKEN
+
+
+# -- quiet_session scheduling -------------------------------------------------
+
+def quiet(**overrides) -> NotificationRequest:
+    fields = {
+        "notification_type": "quiet_session",
+        "minimum_slots": 12,
+        "time_before": "24h",
+    }
+    fields.update(overrides)
+    return request(**fields)
+
+
+def test_a_quiet_session_stores_its_minimum_and_duration(services):
+    notification = services.notifications.create("c1", quiet(), "Advanced Surf")
+    row = raw(services, notification)
+    assert row["minimum_slots"] == 12
+    assert row["time_before"] == "24h"
+
+
+def test_a_quiet_session_leaves_the_threshold_columns_null(services):
+    """Those columns are below_threshold's, with the opposite sense."""
+    row = raw(services, services.notifications.create("c1", quiet(), "Advanced Surf"))
+    assert row["thresholds"] is None
+    assert row["notified_thresholds"] is None
+
+
+def test_a_quiet_session_is_scheduled_for_one_check_not_checked_at_once(services):
+    """18:00 on 2027-08-05 is BST, so 24h earlier is 17:00 UTC the day before."""
+    notification = services.notifications.create("c1", quiet(), "Advanced Surf")
+    assert raw(services, notification)["next_check_at"] == "2027-08-04 17:00:00"
+    assert services.notifications.due() == []
+
+
+def test_the_returned_notification_reports_its_schedule(services):
+    notification = services.notifications.create("c1", quiet(), "Advanced Surf")
+    assert notification.next_check_at == "2027-08-04 17:00:00"
+    assert notification.time_before == "24h"
+
+
+def test_a_quiet_session_created_inside_its_window_is_due_at_once(services):
+    """Created closer to the session than time_before: check on the next tick."""
+    notification = services.notifications.create(
+        "c1", quiet(date="2020-01-02", time="18:00"), "Advanced Surf"
+    )
+    assert raw(services, notification)["next_check_at"] == "2020-01-01 18:00:00"
+    assert [n.notification_id for n in services.notifications.due()] == [
+        notification.notification_id
+    ]
+
+
+def test_a_quiet_session_round_trips_through_the_row(services):
+    created = services.notifications.create("c1", quiet(), "Advanced Surf")
+    loaded = services.notifications.get("c1", created.notification_id)
+    assert loaded.minimum_slots == 12
+    assert loaded.time_before == "24h"

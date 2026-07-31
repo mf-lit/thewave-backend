@@ -75,8 +75,24 @@ def _migration_001_baseline(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_next_check_at ON notifications(next_check_at)")
 
 
+def _migration_002_quiet_session(conn: sqlite3.Connection) -> None:
+    """The two columns quiet_session needs, both nullable and unused elsewhere.
+
+    ``minimum_slots`` is deliberately not folded into ``thresholds``: that
+    column means "alert at or below", and this one means "alert at or above",
+    so sharing it would leave the direction implied by ``notification_type``
+    and invisible to anything reading the table.
+
+    ``time_before`` holds the canonical duration string ("24h") rather than an
+    hour count, so other units can be added without reinterpreting old rows.
+    """
+    _add_column_if_missing(conn, "notifications", "minimum_slots", "INTEGER")
+    _add_column_if_missing(conn, "notifications", "time_before", "TEXT")
+
+
 MIGRATIONS: List[Tuple[int, Callable[[sqlite3.Connection], None]]] = [
     (1, _migration_001_baseline),
+    (2, _migration_002_quiet_session),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]

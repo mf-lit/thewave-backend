@@ -7,6 +7,8 @@ from src.models import (
     Notification,
     NotificationRequest,
     ValidationError,
+    duration_hours,
+    normalize_duration,
     normalize_time,
 )
 
@@ -30,6 +32,40 @@ def test_accepted_time_formats(given, expected):
 def test_rejected_time_formats(given):
     with pytest.raises(ValidationError):
         normalize_time(given)
+
+
+# -- time_before durations ----------------------------------------------------
+
+@pytest.mark.parametrize(
+    "given, expected",
+    [("24h", "24h"), ("24H", "24h"), (" 24h ", "24h"), ("1h", "1h"), ("48h", "48h"),
+     ("06h", "6h")],
+)
+def test_accepted_duration_formats(given, expected):
+    assert normalize_duration(given) == expected
+
+
+@pytest.mark.parametrize("given", ["24", "h", "", "24 h", "1.5h", "-1h", None, 24, ["24h"]])
+def test_rejected_duration_formats(given):
+    """The unit suffix is mandatory, so 30m or 2d can be added later."""
+    with pytest.raises(ValidationError, match="Expected a whole number of hours"):
+        normalize_duration(given)
+
+
+@pytest.mark.parametrize("given", ["0h", "49h", "100h"])
+def test_durations_outside_the_supported_window_are_rejected(given):
+    with pytest.raises(ValidationError, match="between 1h and 48h"):
+        normalize_duration(given)
+
+
+def test_duration_hours_reads_a_stored_value():
+    assert duration_hours("24h") == 24
+
+
+@pytest.mark.parametrize("given", [None, "", "24", "later", 24])
+def test_duration_hours_tolerates_whatever_is_in_the_column(given):
+    """The read side never raises; a broken row must not stall the worker."""
+    assert duration_hours(given) is None
 
 
 def valid_payload(**overrides):
@@ -106,3 +142,73 @@ def test_internal_columns_are_not_exposed():
     body = stored(next_check_at="2026-07-30 19:00:00", notified_thresholds=[5]).to_api()
     assert "next_check_at" not in body
     assert "notified_thresholds" not in body
+
+
+# -- quiet_session ------------------------------------------------------------
+
+def quiet_payload(**overrides):
+    fields = {"notification_type": "quiet_session", "minimum_slots": 12, "time_before": "24h"}
+    fields.update(overrides)
+    return valid_payload(**fields)
+
+
+def test_quiet_session_keeps_its_minimum_and_duration():
+    request = NotificationRequest.from_payload(quiet_payload())
+    assert request.minimum_slots == 12
+    assert request.time_before == "24h"
+
+
+def test_quiet_session_does_not_borrow_the_thresholds_column():
+    """Thresholds mean 'at or below'; this type fires at or above."""
+    request = NotificationRequest.from_payload(quiet_payload(thresholds=[5]))
+    assert request.thresholds is None
+
+
+def test_quiet_session_stores_the_canonical_duration():
+    assert NotificationRequest.from_payload(quiet_payload(time_before="6H")).time_before == "6h"
+
+
+def test_quiet_session_requires_minimum_slots():
+    payload = quiet_payload()
+    del payload["minimum_slots"]
+    with pytest.raises(
+        ValidationError, match="minimum_slots is required for quiet_session notification_type"
+    ):
+        NotificationRequest.from_payload(payload)
+
+
+@pytest.mark.parametrize("given", [-1, "12", [12], 1.5, None])
+def test_quiet_session_rejects_a_malformed_minimum(given):
+    with pytest.raises(ValidationError, match="minimum_slots must be a non-negative integer"):
+        NotificationRequest.from_payload(quiet_payload(minimum_slots=given))
+
+
+def test_quiet_session_requires_time_before():
+    payload = quiet_payload()
+    del payload["time_before"]
+    with pytest.raises(
+        ValidationError, match="time_before is required for quiet_session notification_type"
+    ):
+        NotificationRequest.from_payload(payload)
+
+
+def test_the_quiet_session_fields_are_dropped_for_the_other_types():
+    """A client sending them on a polled type must not have them stored."""
+    request = NotificationRequest.from_payload(
+        valid_payload(time_before="24h", minimum_slots=12)
+    )
+    assert request.time_before is None
+    assert request.minimum_slots is None
+
+
+def test_the_quiet_session_fields_are_omitted_from_the_api_shape_until_set():
+    body = stored().to_api()
+    assert "time_before" not in body and "minimum_slots" not in body
+
+    quiet = stored(minimum_slots=12, time_before="24h").to_api()
+    assert quiet["minimum_slots"] == 12 and quiet["time_before"] == "24h"
+
+
+def test_a_zero_minimum_is_still_reported():
+    """0 is a legitimate minimum and must not be dropped as falsy."""
+    assert stored(minimum_slots=0).to_api()["minimum_slots"] == 0

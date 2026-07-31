@@ -58,3 +58,48 @@ def test_next_check_at_stays_comparable_with_sqlite_datetime_now():
 def test_utc_stamp_converts_from_other_zones():
     london_evening = clock.session_start("2026-07-30", "20:00")
     assert clock.utc_stamp(london_evening) == "2026-07-30 19:00:00"
+
+
+# -- counting back from a session start ---------------------------------------
+
+def test_hours_before_counts_back_from_a_summer_session():
+    """20:00 BST is 19:00 UTC, so 24h earlier is 19:00 UTC the day before."""
+    assert clock.hours_before("2026-07-30", "20:00", 24) == "2026-07-29 19:00:00"
+
+
+def test_hours_before_counts_back_from_a_winter_session():
+    assert clock.hours_before("2026-01-15", "20:00", 24) == "2026-01-14 20:00:00"
+
+
+def test_hours_before_is_elapsed_time_across_the_spring_change():
+    """The clocks go forward on 29 Mar 2026; 48h back must still be 48h.
+
+    Subtracting on the London-local value would re-derive the offset at the
+    earlier wall time and land an hour short.
+    """
+    assert clock.hours_before("2026-03-29", "13:00", 48) == "2026-03-27 12:00:00"
+
+
+def test_hours_before_is_elapsed_time_across_the_autumn_change():
+    """The clocks went back on 25 Oct 2026, so the error is the other way.
+
+    13:00 GMT on the 26th is 13:00 UTC; 48h earlier is 13:00 UTC, which is
+    14:00 local because the 24th is still BST. Wall-clock arithmetic would
+    answer 12:00 UTC.
+    """
+    assert clock.hours_before("2026-10-26", "13:00", 48) == "2026-10-24 13:00:00"
+
+
+def test_hours_before_is_none_when_it_cannot_be_computed():
+    assert clock.hours_before("30/07/2026", "20:00", 24) is None
+    assert clock.hours_before("2026-07-30", "20:00", None) is None
+
+
+def test_just_after_start_lands_past_the_session():
+    """Parked a minute late, so `due()`'s <= cannot beat `is_past`'s <."""
+    assert clock.just_after_start("2026-07-30", "20:00") == "2026-07-30 19:01:00"
+    assert clock.is_past("2026-07-30", "20:00", now=utc(2026, 7, 30, 19, 1)) is True
+
+
+def test_just_after_start_is_none_for_an_unparseable_session():
+    assert clock.just_after_start("2026-07-30", "8pm") is None

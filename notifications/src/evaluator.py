@@ -3,7 +3,7 @@
 Pure functions over a notification and the seat count just read — no database,
 no network — so the rules that actually reach users are directly testable.
 
-Two rules, both carried over exactly:
+Three rules, the first two carried over exactly:
 
 * ``below_threshold`` fires the first time availability falls to or below each
   configured threshold. Every threshold crossed in one step is recorded, so a
@@ -11,13 +11,16 @@ Two rules, both carried over exactly:
   for either.
 * ``above_zero`` fires on the transition from "nothing left" to "something
   available", judged against the reading stored *before* this cycle's write.
+* ``quiet_session`` fires once, when a session that is about to start still has
+  at least its threshold free. *When* that check happens is decided entirely by
+  ``next_check_at``, so this stays a function of availability alone.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
-from .models import ABOVE_ZERO, BELOW_THRESHOLD, Notification
+from .models import ABOVE_ZERO, BELOW_THRESHOLD, QUIET_SESSION, Notification
 
 
 @dataclass(frozen=True)
@@ -57,5 +60,20 @@ def evaluate(notification: Notification, availability: int) -> Decision:
                 notify=True,
                 message=f"Availability ({availability}) has increased above zero",
             )
+        return NO_ACTION
+
+    if notification.notification_type == QUIET_SESSION:
+        # Nothing else writes a reading for this type, so one being present
+        # means the single check has already happened. Firing once is therefore
+        # a property of the row rather than of how it happens to be scheduled.
+        if notification.last_checked_availability is not None:
+            return NO_ACTION
+        minimum = notification.minimum_slots
+        if minimum is None or availability < minimum:
+            return NO_ACTION
+        return Decision(
+            notify=True,
+            message=f"Session is quiet: {availability} slots remaining (minimum {minimum})",
+        )
 
     return NO_ACTION

@@ -125,6 +125,34 @@ def test_create_below_threshold_includes_thresholds(client, auth, client_id):
     assert response.get_json()["thresholds"] == [5, 2]
 
 
+def test_create_quiet_session_echoes_its_own_fields(client, auth, client_id):
+    response = client.post(
+        f"/clients/{client_id}/notifications",
+        json=valid_body(
+            notification_type="quiet_session", minimum_slots=12, time_before="24h"
+        ),
+        headers=auth,
+    )
+    assert response.status_code == 201
+
+    body = response.get_json()
+    assert body["notification_type"] == "quiet_session"
+    assert body["minimum_slots"] == 12
+    assert body["time_before"] == "24h"
+    assert "thresholds" not in body
+
+
+def test_the_quiet_session_fields_are_not_echoed_for_the_other_types(client, auth, client_id):
+    response = client.post(
+        f"/clients/{client_id}/notifications",
+        json=valid_body(time_before="24h", minimum_slots=12),
+        headers=auth,
+    )
+    assert response.status_code == 201
+    body = response.get_json()
+    assert "time_before" not in body and "minimum_slots" not in body
+
+
 def test_create_normalises_time(client, auth, client_id):
     response = client.post(
         f"/clients/{client_id}/notifications", json=valid_body(time="18:00:00.000"), headers=auth
@@ -152,7 +180,8 @@ def test_create_ignores_unknown_fields(client, auth, client_id):
         ({"side": "middle"}, "Invalid side. Must be 'left', 'right', or 'none'"),
         (
             {"notification_type": "maybe"},
-            "Invalid notification_type. Must be 'below_threshold' or 'above_zero'",
+            "Invalid notification_type. Must be 'below_threshold', "
+            "'above_zero', or 'quiet_session'",
         ),
         ({"performance_ak": ""}, "performance_ak is required and must be a string"),
         (
@@ -166,6 +195,30 @@ def test_create_ignores_unknown_fields(client, auth, client_id):
         (
             {"notification_type": "below_threshold", "thresholds": ["5"]},
             "All thresholds must be non-negative integers",
+        ),
+        (
+            {"notification_type": "quiet_session", "time_before": "24h"},
+            "minimum_slots is required for quiet_session notification_type",
+        ),
+        (
+            {"notification_type": "quiet_session", "minimum_slots": [12], "time_before": "24h"},
+            "minimum_slots must be a non-negative integer",
+        ),
+        (
+            {"notification_type": "quiet_session", "minimum_slots": -1, "time_before": "24h"},
+            "minimum_slots must be a non-negative integer",
+        ),
+        (
+            {"notification_type": "quiet_session", "minimum_slots": 12},
+            "time_before is required for quiet_session notification_type",
+        ),
+        (
+            {"notification_type": "quiet_session", "minimum_slots": 12, "time_before": 24},
+            "Invalid time_before format. Expected a whole number of hours, e.g. '24h'",
+        ),
+        (
+            {"notification_type": "quiet_session", "minimum_slots": 12, "time_before": "49h"},
+            "time_before must be between 1h and 48h",
         ),
     ],
 )

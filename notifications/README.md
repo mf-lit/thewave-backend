@@ -98,12 +98,39 @@ is scoped to a client UUID. Errors are always `{"error": "<message>"}`.
   threshold. Each threshold fires once.
 - `above_zero` — push when a sold-out session gets a seat back. Re-arms if it
   sells out again.
+- `quiet_session` — push once, shortly before a session starts, if it still has
+  plenty of room. Takes `minimum_slots` and `time_before` instead of
+  `thresholds`:
+
+```json
+{
+  "performance_ak": "TWB.EVN6.PRF8962",
+  "date": "2026-08-05",
+  "time": "18:00",
+  "side": "right",
+  "notification_type": "quiet_session",
+  "minimum_slots": 12,
+  "time_before": "24h"
+}
+```
+
+`minimum_slots` is a separate field rather than a reused `thresholds` because
+the comparison runs the other way: a threshold fires at or *below* its value,
+`minimum_slots` at or *above*. Sharing one field would leave the direction
+implied by `notification_type` and invisible to anything reading the value.
+
+`time_before` is a duration string from `1h` to `48h`, carrying its unit so
+other units can be added later. Unlike the polled types this one is checked a
+single time, at roughly `session_start - time_before` — near enough on the
+worker's 30–60s cycle — and then goes quiet until the session starts and it is
+deleted. Created closer to the session than `time_before`, it checks at once.
 
 The performance is validated against the calendar API, so a bad
 `performance_ak` gives 404 and a side that isn't sold gives 400.
 
-Responses carry `thresholds` only for `below_threshold`, and
-`last_checked_availability` only once the worker has read it:
+Responses carry `thresholds` only for `below_threshold`, `minimum_slots` and
+`time_before` only for `quiet_session`, and `last_checked_availability` only
+once the worker has read it:
 
 ```json
 {
@@ -148,11 +175,17 @@ string needs an app release. `tests/test_push.py` pins them.
 
 ```
 title  "Advanced Surf: 5th Jan at 18:00"
-body   "Availability dropped to 3 on the right"   (below_threshold)
-       "A session has become available"           (above_zero)
-data   performance_ak, date, time, side, session_title,
-       availability, notification_type, notification_id, threshold
+body   "Availability dropped to 3 on the right"      (below_threshold)
+       "A session has become available"              (above_zero)
+       "Quiet session: 12 slots remaining on the right"  (quiet_session)
+data   performance_ak, date, time, side, session_title, availability,
+       notification_type, notification_id, threshold, minimum_slots
 ```
+
+`threshold` is the count at or below which `below_threshold` fires;
+`minimum_slots` is the count at or above which `quiet_session` does. Opposite
+senses, so they are separate keys — each is `""` for the types it does not
+apply to.
 
 A token FCM reports as unregistered, or as belonging to another Firebase
 project, is deleted.
@@ -163,6 +196,13 @@ Two tables in `scheduling.py`, one keyed on days until the session and one on
 seats remaining; the tighter wins. Sold-out and imminent is polled every three
 minutes, distant and empty every four hours. Each notification carries its own
 `next_check_at`, so the worker only ever fetches the dates it needs.
+
+`quiet_session` opts out of both tables. Its `next_check_at` is written once at
+creation, and once checked it is parked just past the session start — so it can
+never come due again before the worker deletes it. If the calendar has no usable
+seat count at that moment it retries for 30 minutes and is then abandoned
+unfired, since a "starting soon, and quiet" push hours late would describe a
+seat count that no longer means what the user asked about.
 
 ## Maintenance
 
@@ -194,6 +234,8 @@ CREATE TABLE notifications (
     last_checked_availability INTEGER,
     created_at TEXT NOT NULL,         -- naive UTC ISO-8601
     next_check_at TEXT,               -- 'YYYY-MM-DD HH:MM:SS' UTC
+    minimum_slots INTEGER,            -- quiet_session only, fires at or above
+    time_before TEXT,                 -- e.g. '24h', quiet_session only
     PRIMARY KEY (client_id, notification_id)
 );
 

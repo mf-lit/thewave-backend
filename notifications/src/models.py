@@ -8,6 +8,7 @@ failure wins, and a missing field beats a malformed one).
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -15,9 +16,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 BELOW_THRESHOLD = "below_threshold"
 ABOVE_ZERO = "above_zero"
+QUIET_SESSION = "quiet_session"
 
 VALID_SIDES: Tuple[str, ...] = ("left", "right", "none")
-VALID_NOTIFICATION_TYPES: Tuple[str, ...] = (BELOW_THRESHOLD, ABOVE_ZERO)
+VALID_NOTIFICATION_TYPES: Tuple[str, ...] = (BELOW_THRESHOLD, ABOVE_ZERO, QUIET_SESSION)
 
 REQUIRED_FIELDS: Tuple[str, ...] = (
     "performance_ak",
@@ -28,6 +30,15 @@ REQUIRED_FIELDS: Tuple[str, ...] = (
 )
 
 TIME_FORMAT_ERROR = "Invalid time format. Expected HH:MM, HH:MM:SS, or HH:MM:SS.mmm"
+
+MAX_TIME_BEFORE_HOURS = 48
+TIME_BEFORE_FORMAT_ERROR = (
+    "Invalid time_before format. Expected a whole number of hours, e.g. '24h'"
+)
+
+# Only hours today. The suffix is required so minutes or days can be added
+# later without reinterpreting values already stored.
+_DURATION = re.compile(r"^(\d+)h$")
 
 
 class ValidationError(ValueError):
@@ -52,6 +63,34 @@ def normalize_time(value: Any) -> str:
     return f"{hour:02d}:{minute:02d}"
 
 
+def normalize_duration(value: Any) -> str:
+    """Accept ``24h`` (or ``24H``); return canonical ``24h``."""
+    if not isinstance(value, str):
+        raise ValidationError(TIME_BEFORE_FORMAT_ERROR)
+    match = _DURATION.match(value.strip().lower())
+    if not match:
+        raise ValidationError(TIME_BEFORE_FORMAT_ERROR)
+
+    hours = int(match.group(1))
+    if not 1 <= hours <= MAX_TIME_BEFORE_HOURS:
+        raise ValidationError(
+            f"time_before must be between 1h and {MAX_TIME_BEFORE_HOURS}h"
+        )
+    return f"{hours}h"
+
+
+def duration_hours(value: Any) -> Optional[int]:
+    """The hour count in a stored ``time_before``, or None if unreadable.
+
+    The read-side counterpart to `normalize_duration`: it tolerates whatever is
+    actually in the column rather than raising, as `_decode_json_list` does.
+    """
+    if not isinstance(value, str):
+        return None
+    match = _DURATION.match(value.strip().lower())
+    return int(match.group(1)) if match else None
+
+
 @dataclass(frozen=True)
 class NotificationRequest:
     """A validated ``POST /clients/<id>/notifications`` body."""
@@ -62,6 +101,8 @@ class NotificationRequest:
     side: str
     notification_type: str
     thresholds: Optional[List[int]] = None
+    minimum_slots: Optional[int] = None
+    time_before: Optional[str] = None
 
     @classmethod
     def from_payload(cls, payload: Dict[str, Any]) -> "NotificationRequest":
@@ -88,10 +129,13 @@ class NotificationRequest:
         notification_type = payload["notification_type"]
         if notification_type not in VALID_NOTIFICATION_TYPES:
             raise ValidationError(
-                "Invalid notification_type. Must be 'below_threshold' or 'above_zero'"
+                "Invalid notification_type. Must be 'below_threshold', "
+                "'above_zero', or 'quiet_session'"
             )
 
         thresholds = payload.get("thresholds")
+        minimum_slots = None
+        time_before = None
         if notification_type == BELOW_THRESHOLD:
             if not thresholds:
                 raise ValidationError(
@@ -99,6 +143,22 @@ class NotificationRequest:
                 )
             if not all(isinstance(t, int) and t >= 0 for t in thresholds):
                 raise ValidationError("All thresholds must be non-negative integers")
+        elif notification_type == QUIET_SESSION:
+            thresholds = None
+            # Both are required for this type alone, so neither can join
+            # REQUIRED_FIELDS without breaking the other two.
+            if "minimum_slots" not in payload:
+                raise ValidationError(
+                    "minimum_slots is required for quiet_session notification_type"
+                )
+            minimum_slots = payload["minimum_slots"]
+            if not isinstance(minimum_slots, int) or minimum_slots < 0:
+                raise ValidationError("minimum_slots must be a non-negative integer")
+            if "time_before" not in payload:
+                raise ValidationError(
+                    "time_before is required for quiet_session notification_type"
+                )
+            time_before = normalize_duration(payload["time_before"])
         else:
             thresholds = None
 
@@ -109,6 +169,8 @@ class NotificationRequest:
             side=side,
             notification_type=notification_type,
             thresholds=list(thresholds) if thresholds else None,
+            minimum_slots=minimum_slots,
+            time_before=time_before,
         )
 
 
@@ -141,6 +203,8 @@ class Notification:
     notified_thresholds: List[int] = field(default_factory=list)
     last_checked_availability: Optional[int] = None
     next_check_at: Optional[str] = None
+    minimum_slots: Optional[int] = None
+    time_before: Optional[str] = None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "Notification":
@@ -158,12 +222,15 @@ class Notification:
             notified_thresholds=_decode_json_list(row["notified_thresholds"]) or [],
             last_checked_availability=row["last_checked_availability"],
             next_check_at=row["next_check_at"],
+            minimum_slots=row["minimum_slots"],
+            time_before=row["time_before"],
         )
 
     def to_api(self) -> Dict[str, Any]:
         """The wire shape clients receive.
 
-        ``thresholds`` appears only for below_threshold notifications and
+        ``thresholds`` appears only for below_threshold notifications,
+        ``minimum_slots`` and ``time_before`` only for quiet_session, and
         ``last_checked_availability`` only once a check has run, matching
         what the app has always been sent.
         """
@@ -180,6 +247,10 @@ class Notification:
         }
         if self.thresholds is not None:
             body["thresholds"] = self.thresholds
+        if self.minimum_slots is not None:
+            body["minimum_slots"] = self.minimum_slots
+        if self.time_before is not None:
+            body["time_before"] = self.time_before
         if self.last_checked_availability is not None:
             body["last_checked_availability"] = self.last_checked_availability
         return body

@@ -16,12 +16,26 @@ from .services import Services
 from .settings import configure_logging
 
 
+def _fires_at(notification: Notification) -> str:
+    """The seat counts that trigger this row, with the sense of the test.
+
+    below_threshold fires at or below its thresholds and quiet_session at or
+    above its minimum, so the bare numbers would read as each other's opposite
+    sitting in one column.
+    """
+    if notification.thresholds:
+        return "<=" + ",".join(str(t) for t in notification.thresholds)
+    if notification.minimum_slots is not None:
+        return f">={notification.minimum_slots}"
+    return "-"
+
+
 def _print_table(notifications: List[Notification], tokens: set) -> None:
     if not notifications:
         print("No notifications.")
         return
 
-    headers = ("DATE", "TIME", "SIDE", "TYPE", "AVAIL", "THRESHOLDS", "TITLE", "CLIENT", "PUSH")
+    headers = ("DATE", "TIME", "SIDE", "TYPE", "AVAIL", "FIRES AT", "TITLE", "CLIENT", "PUSH")
     rows = [
         (
             n.date,
@@ -29,7 +43,7 @@ def _print_table(notifications: List[Notification], tokens: set) -> None:
             n.side,
             n.notification_type,
             "-" if n.last_checked_availability is None else str(n.last_checked_availability),
-            ",".join(str(t) for t in (n.thresholds or [])) or "-",
+            _fires_at(n),
             n.title,
             n.client_id,
             "yes" if n.client_id in tokens else "NO TOKEN",
