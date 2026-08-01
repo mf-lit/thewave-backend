@@ -17,14 +17,29 @@ from typing import Any, Dict, List, Optional, Tuple
 BELOW_THRESHOLD = "below_threshold"
 ABOVE_ZERO = "above_zero"
 QUIET_SESSION = "quiet_session"
+ANY_QUIET_SESSION = "any_quiet_session"
 
 VALID_SIDES: Tuple[str, ...] = ("left", "right", "none")
-VALID_NOTIFICATION_TYPES: Tuple[str, ...] = (BELOW_THRESHOLD, ABOVE_ZERO, QUIET_SESSION)
+VALID_NOTIFICATION_TYPES: Tuple[str, ...] = (
+    BELOW_THRESHOLD,
+    ABOVE_ZERO,
+    QUIET_SESSION,
+    ANY_QUIET_SESSION,
+)
 
 REQUIRED_FIELDS: Tuple[str, ...] = (
     "performance_ak",
     "date",
     "time",
+    "side",
+    "notification_type",
+)
+
+# any_quiet_session names a *kind* of session rather than one session, so it
+# requires none of the three fields that identify one and requires a title,
+# which for every other type is read off the calendar instead of the payload.
+ANY_QUIET_REQUIRED_FIELDS: Tuple[str, ...] = (
+    "title",
     "side",
     "notification_type",
 )
@@ -79,6 +94,18 @@ def normalize_duration(value: Any) -> str:
     return f"{hours}h"
 
 
+def normalize_title(value: Any) -> str:
+    """Fold a session title to its comparable form.
+
+    Case and surrounding whitespace only. Nothing inside the title is
+    rewritten: the parenthesised parts upstream uses — (In Water),
+    (With Lesson), (ADV+), (EXP T) — are what tell two session types apart, so
+    a watch for "Advanced Surf" must never match "Advanced Surf Lesson" or
+    "Advanced Coaching (In Water)".
+    """
+    return value.strip().lower() if isinstance(value, str) else ""
+
+
 def duration_hours(value: Any) -> Optional[int]:
     """The hour count in a stored ``time_before``, or None if unreadable.
 
@@ -103,13 +130,70 @@ class NotificationRequest:
     thresholds: Optional[List[int]] = None
     minimum_slots: Optional[int] = None
     time_before: Optional[str] = None
+    title: Optional[str] = None
 
     @classmethod
     def from_payload(cls, payload: Dict[str, Any]) -> "NotificationRequest":
-        for name in REQUIRED_FIELDS:
+        # The type decides which fields are required, so it has to be read
+        # before the presence loop. Only an exact match with the new constant
+        # diverts: every other payload — valid, malformed, or missing
+        # notification_type entirely — reaches the checks that have always run,
+        # in the order they have always run in.
+        notification_type = payload.get("notification_type")
+        required = (
+            ANY_QUIET_REQUIRED_FIELDS
+            if notification_type == ANY_QUIET_SESSION
+            else REQUIRED_FIELDS
+        )
+        for name in required:
             if name not in payload:
                 raise ValidationError(f"Missing required field: {name}")
 
+        if notification_type == ANY_QUIET_SESSION:
+            return cls._any_quiet_session(payload)
+        return cls._for_one_session(payload)
+
+    @classmethod
+    def _any_quiet_session(cls, payload: Dict[str, Any]) -> "NotificationRequest":
+        """A rolling watch: no session identified, so a title stands in for one."""
+        title = payload["title"]
+        if not title or not isinstance(title, str):
+            raise ValidationError("title is required and must be a string")
+
+        side = payload["side"]
+        if side not in VALID_SIDES:
+            raise ValidationError("Invalid side. Must be 'left', 'right', or 'none'")
+
+        if "minimum_slots" not in payload:
+            raise ValidationError(
+                "minimum_slots is required for any_quiet_session notification_type"
+            )
+        minimum_slots = payload["minimum_slots"]
+        if not isinstance(minimum_slots, int) or minimum_slots < 0:
+            raise ValidationError("minimum_slots must be a non-negative integer")
+
+        if "time_before" not in payload:
+            raise ValidationError(
+                "time_before is required for any_quiet_session notification_type"
+            )
+
+        # The three columns that identify one session are NOT NULL and this
+        # type has no session; empty strings are the sentinel. `clock` reads
+        # them as unparseable, so nothing treats the row as a dated one.
+        return cls(
+            performance_ak="",
+            date="",
+            time="",
+            side=side,
+            notification_type=ANY_QUIET_SESSION,
+            thresholds=None,
+            minimum_slots=minimum_slots,
+            time_before=normalize_duration(payload["time_before"]),
+            title=title.strip(),
+        )
+
+    @classmethod
+    def _for_one_session(cls, payload: Dict[str, Any]) -> "NotificationRequest":
         performance_ak = payload["performance_ak"]
         if not performance_ak or not isinstance(performance_ak, str):
             raise ValidationError("performance_ak is required and must be a string")
@@ -130,7 +214,7 @@ class NotificationRequest:
         if notification_type not in VALID_NOTIFICATION_TYPES:
             raise ValidationError(
                 "Invalid notification_type. Must be 'below_threshold', "
-                "'above_zero', or 'quiet_session'"
+                "'above_zero', 'quiet_session', or 'any_quiet_session'"
             )
 
         thresholds = payload.get("thresholds")
@@ -186,6 +270,27 @@ def _decode_json_list(raw: Any) -> Optional[List[int]]:
         return None
 
 
+def _decode_json_map(raw: Any) -> Dict[str, str]:
+    """Decode a JSON-object column, tolerating NULL and anything malformed.
+
+    Unlike `_decode_json_list` there is no absent-versus-empty distinction worth
+    preserving here, so an unreadable value becomes an empty map rather than
+    None. Keys and values are coerced to str so a hand-edited row cannot put a
+    non-string into a comparison.
+    """
+    if raw is None or raw == "":
+        return {}
+    decoded = raw
+    if not isinstance(decoded, dict):
+        try:
+            decoded = json.loads(raw)
+        except (TypeError, ValueError):
+            return {}
+    if not isinstance(decoded, dict):
+        return {}
+    return {str(key): str(value) for key, value in decoded.items()}
+
+
 @dataclass(frozen=True)
 class Notification:
     """A stored notification row."""
@@ -205,6 +310,11 @@ class Notification:
     next_check_at: Optional[str] = None
     minimum_slots: Optional[int] = None
     time_before: Optional[str] = None
+    # performance_ak -> session date, for the sessions an any_quiet_session row
+    # has already fired for. The date is what lets an entry be dropped once its
+    # session is over, so the map stays bounded on a row that outlives every
+    # session it notifies about.
+    notified_performances: Dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "Notification":
@@ -224,15 +334,22 @@ class Notification:
             next_check_at=row["next_check_at"],
             minimum_slots=row["minimum_slots"],
             time_before=row["time_before"],
+            notified_performances=_decode_json_map(row["notified_performances"]),
         )
 
     def to_api(self) -> Dict[str, Any]:
         """The wire shape clients receive.
 
         ``thresholds`` appears only for below_threshold notifications,
-        ``minimum_slots`` and ``time_before`` only for quiet_session, and
+        ``minimum_slots`` and ``time_before`` only for the quiet types, and
         ``last_checked_availability`` only once a check has run, matching
         what the app has always been sent.
+
+        ``performance_ak``/``date``/``time`` are always present, empty for an
+        any_quiet_session row: they are fields every row has rather than
+        type-specific extras, so the response shape stays invariant and a
+        non-nullable client-side String cannot blow up on a missing key.
+        ``notified_performances`` is internal, like ``notified_thresholds``.
         """
         body: Dict[str, Any] = {
             "notification_id": self.notification_id,

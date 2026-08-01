@@ -24,6 +24,13 @@ SEATS_TABLE: Sequence[int] = (3, 3, 3, 3, 3, 5, 10, 15, 20, 30, 45, 60, 90, 120,
 # old code did in the missing case.
 FALLBACK_MINUTES = 3
 
+# any_quiet_session opts out of both tables: it is not tracking one session's
+# seat count towards a start time, it is watching a rolling window, so neither
+# "days until" nor "seats left" is defined for it. A fixed cadence instead,
+# scheduled onto a grid by `clock.next_slot` so every rolling row comes due in
+# the same cycle and shares one calendar fetch.
+ROLLING_SCAN_MINUTES = 5
+
 
 def interval_minutes(
     availability: int, session_start: Optional[datetime], now: Optional[datetime] = None

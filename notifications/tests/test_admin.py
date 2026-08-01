@@ -121,3 +121,42 @@ def test_list_shows_a_dash_when_nothing_triggers_on_a_count(services, capsys):
     add(services, "c1")  # above_zero
     run(services, ["list"])
     assert "FIRES AT" in capsys.readouterr().out
+
+
+# -- any_quiet_session --------------------------------------------------------
+
+def add_rolling(services, client_id="rolling", **overrides):
+    fields = {
+        "notification_type": "any_quiet_session",
+        "title": "Advanced Surf",
+        "side": "right",
+        "minimum_slots": 8,
+        "time_before": "24h",
+    }
+    fields.update(overrides)
+    return services.notifications.create(
+        client_id, NotificationRequest.from_payload(fields), fields["title"]
+    )
+
+
+def test_list_shows_a_rolling_watch_without_a_date(services, capsys):
+    """It stores no session, so its horizon stands in for a start time."""
+    add_rolling(services)
+    services.clients.upsert_token("rolling", VALID_TOKEN)
+
+    assert run(services, ["list"]) == 0
+
+    line = [l for l in capsys.readouterr().out.splitlines() if "any_quiet_session" in l][0]
+    assert line.split()[:2] == ["-", "24h"]
+    assert ">=8" in line
+
+
+def test_clear_notified_re_arms_a_rolling_watch(services, capsys):
+    notification = add_rolling(services)
+    services.notifications.record_notified_performances(notification, {"P1": "2026-08-05"})
+
+    assert run(services, ["clear-notified"]) == 0
+
+    assert "1 notification(s)" in capsys.readouterr().out
+    reloaded = services.notifications.get("rolling", notification.notification_id)
+    assert reloaded.notified_performances == {}

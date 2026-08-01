@@ -16,7 +16,7 @@ was and past sessions lingered before being deleted.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import List, Optional
 from zoneinfo import ZoneInfo
 
 LONDON = ZoneInfo("Europe/London")
@@ -74,6 +74,49 @@ def hours_before(date_str: str, time_str: str, hours: Optional[int]) -> Optional
     if start is None or hours is None:
         return None
     return utc_stamp(start.astimezone(timezone.utc) - timedelta(hours=hours))
+
+
+def within_hours(
+    date_str: str, time_str: str, hours: Optional[int], now: Optional[datetime] = None
+) -> bool:
+    """Whether a session starts inside the window [now, now + hours].
+
+    ``start >= now`` also excludes a session that has already begun, so this is
+    the whole membership test for a rolling watch — there is no separate
+    `is_past` check on that path. Unparseable input is not in any window.
+    """
+    start = session_start(date_str, time_str)
+    if start is None or hours is None:
+        return False
+    moment = now or now_utc()
+    return moment <= start <= moment + timedelta(hours=hours)
+
+
+def dates_within(hours: int, now: Optional[datetime] = None) -> List[str]:
+    """Every London-local calendar date the window from now to now+hours touches.
+
+    At most three at the 48h maximum. The timedelta is added to an aware
+    datetime and the local date read off the result, so a window spanning a
+    clock change still covers the right days.
+    """
+    start = (now or now_utc()).astimezone(LONDON)
+    end = start + timedelta(hours=hours)
+    dates, day = [], start.date()
+    while day <= end.date():
+        dates.append(day.strftime(DATE_FORMAT))
+        day += timedelta(days=1)
+    return dates
+
+
+def next_slot(minutes: int, now: Optional[datetime] = None) -> str:
+    """UTC stamp of the next boundary on a fixed ``minutes`` grid.
+
+    Rolling watches share one calendar fetch only if they come due together, so
+    they are scheduled onto a grid rather than ``now + interval`` — otherwise
+    rows created minutes apart wake separately and each pays its own fetch.
+    """
+    moment = (now or now_utc()).astimezone(timezone.utc).replace(second=0, microsecond=0)
+    return utc_stamp(moment + timedelta(minutes=minutes - (moment.minute % minutes)))
 
 
 def just_after_start(date_str: str, time_str: str) -> Optional[str]:

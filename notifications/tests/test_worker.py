@@ -5,12 +5,14 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from src import clock
+from dataclasses import replace
+
+from src import clock, scheduling
 from src.calendar_client import CalendarError
 from src.models import NotificationRequest
 from src.push import PushError
 from src.worker import Worker
-from tests.conftest import VALID_TOKEN, make_day, make_performance
+from tests.conftest import VALID_TOKEN, make_day, make_performance, soon
 
 FUTURE = "2027-08-05"
 PAST = "2020-01-01"
@@ -424,3 +426,318 @@ def test_a_quiet_session_gives_up_when_its_side_stops_being_sold(
 def test_a_far_future_quiet_session_does_not_change_the_sleep_bounds(worker, services):
     add_quiet(services)
     assert 30 <= worker.seconds_until_next_cycle() <= 60
+
+
+# -- any_quiet_session --------------------------------------------------------
+
+def add_rolling(services, client_id="client-1", **overrides):
+    fields = {
+        "notification_type": "any_quiet_session",
+        "title": "Advanced Surf",
+        "side": "right",
+        "minimum_slots": 8,
+        "time_before": "24h",
+    }
+    fields.update(overrides)
+    return services.notifications.create(
+        client_id, NotificationRequest.from_payload(fields), fields["title"]
+    )
+
+
+def session_in(hours, performance_ak="P1", title="Advanced Surf", seats=None):
+    """A day holding one performance that many hours from now."""
+    date, time = soon(hours)
+    return make_day(
+        date,
+        [make_performance(performance_ak, title, time, seats or {"left": 0, "right": 9})],
+    )
+
+
+def make_due(services, notification):
+    """Bring a rolling row forward so the next cycle picks it up again."""
+    services.notifications.reschedule(notification, "2020-01-01 00:00:00")
+    return services.notifications.get(notification.client_id, notification.notification_id)
+
+
+@pytest.fixture
+def rolling_ready(services, calendar):
+    services.clients.upsert_token("client-1", VALID_TOKEN)
+    return calendar
+
+
+def test_a_rolling_watch_pushes_for_a_quiet_session_in_its_window(
+    worker, services, sender, rolling_ready
+):
+    rolling_ready.days = [session_in(2)]
+    add_rolling(services)
+
+    worker.run_once()
+
+    assert len(sender.sent) == 1
+    assert sender.sent[0].data["performance_ak"] == "P1"
+    assert sender.sent[0].data["availability"] == "9"
+    assert sender.sent[0].body == "Quiet session: 9 slots remaining on the right"
+
+
+def test_the_push_describes_the_matched_session_not_the_row(
+    worker, services, sender, rolling_ready
+):
+    date, time = soon(2)
+    rolling_ready.days = [session_in(2)]
+    notification = add_rolling(services)
+
+    worker.run_once()
+
+    data = sender.sent[0].data
+    assert (data["date"], data["time"]) == (date, time)
+    assert data["session_title"] == "Advanced Surf"
+    assert data["notification_type"] == "any_quiet_session"
+    assert data["minimum_slots"] == "8"
+    assert data["threshold"] == ""
+
+    # The row itself still stores no session.
+    row = stored(services, notification)
+    assert (row.performance_ak, row.date, row.time) == ("", "", "")
+
+
+def test_a_busy_session_is_not_pushed_for(worker, services, sender, rolling_ready):
+    rolling_ready.days = [session_in(2, seats={"right": 7})]
+    notification = add_rolling(services)
+
+    worker.run_once()
+
+    assert sender.sent == []
+    assert stored(services, notification).notified_performances == {}
+
+
+def test_a_rolling_watch_never_records_a_reading(worker, services, rolling_ready):
+    """last_checked_availability is a per-session field on a row without one."""
+    rolling_ready.days = [session_in(2)]
+    notification = add_rolling(services)
+
+    worker.run_once()
+
+    assert stored(services, notification).last_checked_availability is None
+
+
+def test_one_session_is_never_pushed_for_twice(worker, services, sender, rolling_ready):
+    """The requirement: quiet, then busy, then quiet again still fires once."""
+    rolling_ready.days = [session_in(2)]
+    notification = add_rolling(services)
+
+    worker.run_once()
+    assert len(sender.sent) == 1
+
+    for seats in ({"right": 0}, {"right": 20}, {"right": 9}):
+        rolling_ready.days = [session_in(2, seats=seats)]
+        make_due(services, notification)
+        worker.run_once()
+
+    assert len(sender.sent) == 1
+
+
+def test_a_second_session_going_quiet_later_still_pushes(
+    worker, services, sender, rolling_ready
+):
+    rolling_ready.days = [session_in(2, "P1")]
+    notification = add_rolling(services)
+    worker.run_once()
+    assert [m.data["performance_ak"] for m in sender.sent] == ["P1"]
+
+    date, time = soon(3)
+    rolling_ready.days = [
+        make_day(
+            date,
+            [
+                make_performance("P1", "Advanced Surf", time, {"right": 9}),
+                make_performance("P2", "Advanced Surf", time, {"right": 12}),
+            ],
+        )
+    ]
+    make_due(services, notification)
+    worker.run_once()
+
+    assert [m.data["performance_ak"] for m in sender.sent] == ["P1", "P2"]
+
+
+def test_two_matches_in_one_cycle_both_push_soonest_first(
+    worker, services, sender, rolling_ready
+):
+    early_date, early_time = soon(2)
+    late_date, late_time = soon(3)
+    rolling_ready.days = [
+        make_day(late_date, [make_performance("LATE", "Advanced Surf", late_time, {"right": 9})]),
+        make_day(early_date, [make_performance("EARLY", "Advanced Surf", early_time, {"right": 9})]),
+    ] if early_date != late_date else [
+        make_day(
+            early_date,
+            [
+                make_performance("LATE", "Advanced Surf", late_time, {"right": 9}),
+                make_performance("EARLY", "Advanced Surf", early_time, {"right": 9}),
+            ],
+        )
+    ]
+    notification = add_rolling(services)
+
+    worker.run_once()
+
+    assert [m.data["performance_ak"] for m in sender.sent] == ["EARLY", "LATE"]
+    assert set(stored(services, notification).notified_performances) == {"EARLY", "LATE"}
+
+
+def test_a_session_beyond_the_window_is_not_pushed_for(
+    worker, services, sender, rolling_ready
+):
+    rolling_ready.days = [session_in(30)]
+    add_rolling(services)  # 24h window
+
+    worker.run_once()
+
+    assert sender.sent == []
+
+
+def test_a_session_that_has_already_started_is_not_pushed_for(
+    worker, services, sender, rolling_ready
+):
+    rolling_ready.days = [session_in(-1)]
+    add_rolling(services)
+
+    worker.run_once()
+
+    assert sender.sent == []
+
+
+def test_a_wider_window_reaches_a_later_session(worker, services, sender, rolling_ready):
+    rolling_ready.days = [session_in(30)]
+    add_rolling(services, time_before="48h")
+
+    worker.run_once()
+
+    assert len(sender.sent) == 1
+
+
+@pytest.mark.parametrize(
+    "day",
+    [
+        session_in(2, title="Advanced Surf Lesson"),
+        session_in(2, title="Advanced Coaching (In Water)"),
+        session_in(2, seats={"left": 9}),
+    ],
+)
+def test_a_near_miss_is_ignored(worker, services, sender, rolling_ready, day):
+    rolling_ready.days = [day]
+    add_rolling(services)
+
+    worker.run_once()
+
+    assert sender.sent == []
+
+
+def test_a_rolling_watch_is_never_deleted(worker, services, rolling_ready):
+    """It has no session to expire against; only the client removes it."""
+    rolling_ready.days = [session_in(2)]
+    notification = add_rolling(services)
+
+    for _ in range(3):
+        make_due(services, notification)
+        worker.run_once()
+
+    assert stored(services, notification) is not None
+
+
+def test_a_rolling_watch_reschedules_onto_the_grid(worker, services, rolling_ready):
+    rolling_ready.days = [session_in(2)]
+    notification = add_rolling(services)
+
+    worker.run_once()
+
+    next_check = stored(services, notification).next_check_at
+    assert next_check == clock.next_slot(scheduling.ROLLING_SCAN_MINUTES)
+    assert int(next_check[14:16]) % scheduling.ROLLING_SCAN_MINUTES == 0
+
+
+def test_rolling_watches_share_one_slot_and_so_one_fetch(worker, services, rolling_ready):
+    rolling_ready.days = [session_in(2)]
+    first = add_rolling(services)
+    second = add_rolling(services, client_id="client-2")
+
+    worker.run_once()
+
+    assert stored(services, first).next_check_at == stored(services, second).next_check_at
+    assert len(rolling_ready.requested_dates) == 1
+
+
+def test_an_empty_calendar_leaves_the_watch_scheduled(
+    worker, services, sender, rolling_ready
+):
+    rolling_ready.days = []
+    notification = add_rolling(services)
+
+    worker.run_once()
+
+    assert sender.sent == []
+    assert stored(services, notification).next_check_at is not None
+
+
+def test_a_corrupt_time_before_reschedules_rather_than_crashing(
+    worker, services, sender, rolling_ready
+):
+    rolling_ready.days = [session_in(2)]
+    notification = add_rolling(services)
+    services.notifications.db.connection().execute(
+        "UPDATE notifications SET time_before = 'soon' WHERE notification_id = ?",
+        (notification.notification_id,),
+    )
+    services.notifications.db.connection().commit()
+
+    worker.run_once()
+
+    assert sender.sent == []
+    assert stored(services, notification).next_check_at is not None
+
+
+def test_a_corrupt_time_before_contributes_no_dates(services):
+    notification = add_rolling(services)
+    broken = replace(notification, time_before="soon")
+    assert Worker._scan_dates(broken) == []
+
+
+def test_the_window_is_clamped_to_the_maximum(services):
+    """A hand-edited row must not ask the calendar for an arbitrary range."""
+    notification = replace(add_rolling(services), time_before="1000h")
+    assert len(Worker._scan_dates(notification)) == 3
+
+
+def test_run_once_fetches_the_union_of_fixed_dates_and_rolling_windows(
+    worker, services, rolling_ready
+):
+    add(services, date=FUTURE)
+    add_rolling(services)
+
+    worker.run_once()
+
+    requested = rolling_ready.requested_dates[0]
+    assert requested == sorted(requested)
+    assert FUTURE in requested
+    assert set(clock.dates_within(24)) <= set(requested)
+
+
+def test_a_notified_session_is_forgotten_once_its_date_has_passed(
+    worker, services, sender, rolling_ready
+):
+    """Otherwise the map grows without bound on a row that outlives its sessions."""
+    rolling_ready.days = [session_in(2, "P1")]
+    notification = add_rolling(services)
+    worker.run_once()
+
+    services.notifications.record_notified_performances(
+        notification, {"P1": "2020-01-01", "P2": "2020-06-01"}
+    )
+    date, time = soon(3)
+    rolling_ready.days = [
+        make_day(date, [make_performance("P3", "Advanced Surf", time, {"right": 9})])
+    ]
+    make_due(services, notification)
+    worker.run_once()
+
+    assert set(stored(services, notification).notified_performances) == {"P3"}

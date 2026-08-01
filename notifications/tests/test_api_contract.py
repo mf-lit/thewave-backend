@@ -181,7 +181,7 @@ def test_create_ignores_unknown_fields(client, auth, client_id):
         (
             {"notification_type": "maybe"},
             "Invalid notification_type. Must be 'below_threshold', "
-            "'above_zero', or 'quiet_session'",
+            "'above_zero', 'quiet_session', or 'any_quiet_session'",
         ),
         ({"performance_ak": ""}, "performance_ak is required and must be a string"),
         (
@@ -505,3 +505,102 @@ def test_rotated_api_key_is_picked_up_without_restart(client, client_id, config_
     assert client.get(
         f"/clients/{client_id}/notifications", headers={"x-api-key": rotated}
     ).status_code == 200
+
+
+# -- any_quiet_session --------------------------------------------------------
+
+def rolling_body(**overrides):
+    body = {
+        "notification_type": "any_quiet_session",
+        "title": "Advanced Surf",
+        "side": "right",
+        "minimum_slots": 8,
+        "time_before": "24h",
+    }
+    body.update(overrides)
+    return body
+
+
+def test_a_rolling_watch_is_created_without_naming_a_session(client, client_id, auth):
+    response = client.post(
+        f"/clients/{client_id}/notifications", json=rolling_body(), headers=auth
+    )
+
+    assert response.status_code == 201
+    body = response.get_json()
+    assert body["notification_type"] == "any_quiet_session"
+    assert body["title"] == "Advanced Surf"
+    assert body["minimum_slots"] == 8 and body["time_before"] == "24h"
+    assert body["performance_ak"] == "" and body["date"] == "" and body["time"] == ""
+
+
+def test_creating_a_rolling_watch_does_not_touch_the_calendar(
+    client, client_id, auth, calendar
+):
+    """It names a title, not a session, so there is nothing to look up."""
+    client.post(f"/clients/{client_id}/notifications", json=rolling_body(), headers=auth)
+
+    assert calendar.requested_dates == []
+
+
+def test_a_rolling_watch_can_be_created_while_the_calendar_is_down(
+    client, client_id, auth, calendar
+):
+    calendar.error = CalendarError("upstream is down")
+
+    response = client.post(
+        f"/clients/{client_id}/notifications", json=rolling_body(), headers=auth
+    )
+
+    assert response.status_code == 201
+
+
+def test_an_unscheduled_title_is_accepted(client, client_id, auth):
+    """Titles come and go seasonally; the row outlives any one of them."""
+    response = client.post(
+        f"/clients/{client_id}/notifications",
+        json=rolling_body(title="Midnight Longboarding"),
+        headers=auth,
+    )
+
+    assert response.status_code == 201
+    assert response.get_json()["title"] == "Midnight Longboarding"
+
+
+@pytest.mark.parametrize(
+    "overrides, expected",
+    [
+        ({"title": ""}, "title is required and must be a string"),
+        ({"side": "middle"}, "Invalid side. Must be 'left', 'right', or 'none'"),
+        ({"minimum_slots": -1}, "minimum_slots must be a non-negative integer"),
+        ({"time_before": "72h"}, "time_before must be between 1h and 48h"),
+    ],
+)
+def test_rolling_validation_messages(client, client_id, auth, overrides, expected):
+    response = client.post(
+        f"/clients/{client_id}/notifications", json=rolling_body(**overrides), headers=auth
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": expected}
+
+
+@pytest.mark.parametrize("field", ["title", "minimum_slots", "time_before"])
+def test_rolling_required_fields(client, client_id, auth, field):
+    body = rolling_body()
+    del body[field]
+
+    response = client.post(f"/clients/{client_id}/notifications", json=body, headers=auth)
+
+    assert response.status_code == 400
+    assert field in response.get_json()["error"]
+
+
+def test_a_rolling_watch_round_trips_through_the_list_endpoint(client, client_id, auth):
+    client.post(f"/clients/{client_id}/notifications", json=rolling_body(), headers=auth)
+
+    listed = client.get(f"/clients/{client_id}/notifications", headers=auth).get_json()
+
+    assert len(listed) == 1
+    assert listed[0]["notification_type"] == "any_quiet_session"
+    assert "notified_performances" not in listed[0]

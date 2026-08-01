@@ -288,3 +288,68 @@ def test_a_quiet_session_round_trips_through_the_row(services):
     loaded = services.notifications.get("c1", created.notification_id)
     assert loaded.minimum_slots == 12
     assert loaded.time_before == "24h"
+
+
+# -- any_quiet_session --------------------------------------------------------
+
+def rolling(**overrides) -> NotificationRequest:
+    fields = {
+        "notification_type": "any_quiet_session",
+        "title": "Advanced Surf",
+        "side": "right",
+        "minimum_slots": 8,
+        "time_before": "24h",
+    }
+    fields.update(overrides)
+    return NotificationRequest.from_payload(fields)
+
+
+def test_a_rolling_watch_stores_empty_session_columns(services):
+    """The three NOT NULL columns are satisfied by sentinels, not relaxed."""
+    row = raw(services, services.notifications.create("c1", rolling(), "Advanced Surf"))
+    assert row["performance_ak"] == "" and row["date"] == "" and row["time"] == ""
+    assert row["title"] == "Advanced Surf"
+
+
+def test_a_rolling_watch_is_due_at_once(services):
+    """No session to count back from, so it joins the polled types."""
+    notification = services.notifications.create("c1", rolling(), "Advanced Surf")
+    assert raw(services, notification)["next_check_at"] is None
+    assert [n.notification_id for n in services.notifications.due()] == [
+        notification.notification_id
+    ]
+
+
+def test_a_rolling_watch_starts_with_an_empty_notified_map(services):
+    notification = services.notifications.create("c1", rolling(), "Advanced Surf")
+    assert raw(services, notification)["notified_performances"] == "{}"
+    assert notification.notified_performances == {}
+
+
+def test_the_notified_map_is_null_for_every_other_type(services):
+    for notification_type in ("above_zero", "quiet_session"):
+        created = services.notifications.create(
+            "c1",
+            quiet() if notification_type == "quiet_session" else request(),
+            "Advanced Surf",
+        )
+        assert raw(services, created)["notified_performances"] is None
+
+
+def test_notified_performances_round_trip(services):
+    created = services.notifications.create("c1", rolling(), "Advanced Surf")
+    services.notifications.record_notified_performances(created, {"P1": "2026-08-05"})
+
+    loaded = services.notifications.get("c1", created.notification_id)
+    assert loaded.notified_performances == {"P1": "2026-08-05"}
+
+
+def test_clear_notified_performances_only_touches_rolling_watches(services):
+    rolling_row = services.notifications.create("c1", rolling(), "Advanced Surf")
+    quiet_row = services.notifications.create("c1", quiet(), "Advanced Surf")
+    services.notifications.record_notified_performances(rolling_row, {"P1": "2026-08-05"})
+
+    assert services.notifications.clear_notified_performances() == 1
+
+    assert services.notifications.get("c1", rolling_row.notification_id).notified_performances == {}
+    assert raw(services, quiet_row)["notified_performances"] is None

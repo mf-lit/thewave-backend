@@ -8,9 +8,11 @@ import requests
 
 from src.calendar_client import (
     CalendarClient,
+    CalendarData,
     CalendarError,
     availability_for_side,
     group_consecutive,
+    matching_sessions,
     performance_title,
 )
 from tests.conftest import make_day, make_performance
@@ -194,3 +196,98 @@ def test_availability_by_side():
 def test_title_extraction():
     assert performance_title(make_performance(title="Improver Lesson")) == "Improver Lesson"
     assert performance_title({}) == ""
+
+
+# -- matching_sessions --------------------------------------------------------
+
+def rolling_day(date="2026-08-05"):
+    return make_day(
+        date,
+        [
+            make_performance("P1", "Advanced Surf", "18:00:00.000", {"left": 2, "right": 7}),
+            make_performance("P2", "Advanced Surf", "10:00", {"right": 4}),
+            make_performance("P3", "Advanced Surf Lesson", "11:00", {"right": 9}),
+            make_performance("P4", "Advanced Coaching (In Water)", "12:00", {"right": 9}),
+            make_performance("P5", "Advanced Surf", "13:00", {"left": 9}),
+        ],
+    )
+
+
+def test_matching_sessions_finds_every_performance_with_that_title_and_side():
+    found = matching_sessions(CalendarData(days=[rolling_day()]), "Advanced Surf", "right")
+    assert [s.performance_ak for s in found] == ["P2", "P1"]
+
+
+def test_matching_sessions_returns_them_soonest_first():
+    days = [rolling_day("2026-08-06"), rolling_day("2026-08-05")]
+    found = matching_sessions(CalendarData(days=days), "Advanced Surf", "right")
+    assert [(s.date, s.time) for s in found] == [
+        ("2026-08-05", "10:00"),
+        ("2026-08-05", "18:00"),
+        ("2026-08-06", "10:00"),
+        ("2026-08-06", "18:00"),
+    ]
+
+
+def test_a_session_carries_the_day_it_was_returned_under():
+    """`performance["date"]` is not relied on; `fetch_dates` filters on the day key."""
+    found = matching_sessions(CalendarData(days=[rolling_day("2026-09-01")]), "Advanced Surf", "right")
+    assert {s.date for s in found} == {"2026-09-01"}
+
+
+def test_matching_sessions_normalises_the_upstream_time():
+    found = matching_sessions(CalendarData(days=[rolling_day()]), "Advanced Surf", "right")
+    assert [s.time for s in found] == ["10:00", "18:00"]
+
+
+def test_matching_sessions_reports_the_availability_for_the_side_asked_for():
+    right = matching_sessions(CalendarData(days=[rolling_day()]), "Advanced Surf", "right")
+    left = matching_sessions(CalendarData(days=[rolling_day()]), "Advanced Surf", "left")
+    assert {s.performance_ak: s.availability for s in right} == {"P1": 7, "P2": 4}
+    assert {s.performance_ak: s.availability for s in left} == {"P1": 2, "P5": 9}
+
+
+@pytest.mark.parametrize("given", ["advanced surf", "ADVANCED SURF", "  Advanced Surf  "])
+def test_matching_sessions_folds_case_and_surrounding_space(given):
+    found = matching_sessions(CalendarData(days=[rolling_day()]), given, "right")
+    assert [s.performance_ak for s in found] == ["P2", "P1"]
+
+
+@pytest.mark.parametrize("title", ["Advanced", "Advanced Surf Lesson", "Surf"])
+def test_matching_sessions_never_matches_on_a_prefix_or_substring(title):
+    found = matching_sessions(CalendarData(days=[rolling_day()]), title, "right")
+    assert [s.performance_ak for s in found] != ["P2", "P1"]
+
+
+def test_a_neighbouring_title_is_not_pulled_in():
+    found = matching_sessions(CalendarData(days=[rolling_day()]), "Advanced Surf", "right")
+    assert {"P3", "P4"}.isdisjoint({s.performance_ak for s in found})
+
+
+def test_matching_sessions_keeps_the_upstream_casing_for_display():
+    days = [make_day("2026-08-05", [make_performance("P1", "Advanced Surf", "10:00", {"right": 9})])]
+    found = matching_sessions(CalendarData(days=days), "advanced surf", "right")
+    assert found[0].title == "Advanced Surf"
+
+
+@pytest.mark.parametrize(
+    "performance",
+    [
+        make_performance("", "Advanced Surf", "10:00", {"right": 9}),
+        make_performance("P9", "Advanced Surf", "not-a-time", {"right": 9}),
+        make_performance("P9", "Advanced Surf", "10:00", {"left": 9}),
+    ],
+)
+def test_matching_sessions_skips_what_it_cannot_use(performance):
+    days = [make_day("2026-08-05", [performance])]
+    assert matching_sessions(CalendarData(days=days), "Advanced Surf", "right") == []
+
+
+def test_matching_sessions_refuses_an_empty_title():
+    """An all-whitespace title would otherwise match every untitled performance."""
+    assert matching_sessions(CalendarData(days=[rolling_day()]), "   ", "right") == []
+
+
+def test_matching_sessions_skips_a_day_without_a_date():
+    days = [{"performances": [make_performance("P1", "Advanced Surf", "10:00", {"right": 9})]}]
+    assert matching_sessions(CalendarData(days=days), "Advanced Surf", "right") == []

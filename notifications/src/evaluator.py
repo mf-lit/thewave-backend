@@ -14,6 +14,10 @@ Three rules, the first two carried over exactly:
 * ``quiet_session`` fires once, when a session that is about to start still has
   at least its threshold free. *When* that check happens is decided entirely by
   ``next_check_at``, so this stays a function of availability alone.
+
+``any_quiet_session`` gets its own entry point, `evaluate_any_quiet`, because it
+is judged once per *matched session* rather than once per row; the worker owns
+the iteration, this module still owns the rule.
 """
 from __future__ import annotations
 
@@ -77,3 +81,28 @@ def evaluate(notification: Notification, availability: int) -> Decision:
         )
 
     return NO_ACTION
+
+
+def evaluate_any_quiet(
+    notification: Notification, performance_ak: str, availability: int
+) -> Decision:
+    """Whether an any_quiet_session row should fire for one matched session.
+
+    The window test is deliberately absent, for the same reason quiet_session's
+    timing lives in ``next_check_at``: *which* sessions are candidates is a
+    scheduling question, so this stays a function of seats and history alone.
+
+    Note the asymmetry with quiet_session, which reads
+    ``last_checked_availability`` as its fired-flag. One row watching many
+    sessions cannot do that — hence ``notified_performances``, which records
+    the firing per session rather than per row.
+    """
+    if performance_ak in notification.notified_performances:
+        return NO_ACTION
+    minimum = notification.minimum_slots
+    if minimum is None or availability < minimum:
+        return NO_ACTION
+    return Decision(
+        notify=True,
+        message=f"Session is quiet: {availability} slots remaining (minimum {minimum})",
+    )

@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Protocol, Tuple
 
-from .models import ABOVE_ZERO, QUIET_SESSION, Notification
+from .models import ABOVE_ZERO, ANY_QUIET_SESSION, QUIET_SESSION, Notification
 from .repository import ClientRepository
 
 logger = logging.getLogger(__name__)
@@ -74,7 +74,10 @@ def display_strings(notification: Notification, availability: int) -> Tuple[str,
     )
     if notification.notification_type == ABOVE_ZERO:
         body = "A session has become available"
-    elif notification.notification_type == QUIET_SESSION:
+    elif notification.notification_type in (QUIET_SESSION, ANY_QUIET_SESSION):
+        # The same sentence for both: an any_quiet_session push is handed a copy
+        # carrying the matched session's date and time, so the title line above
+        # already says which session this is.
         body = f"Quiet session: {availability} slots remaining on the {notification.side}"
     else:
         body = f"Availability dropped to {availability} on the {notification.side}"

@@ -213,3 +213,15 @@ def test_a_database_predating_time_before_gains_the_column(tmp_path):
     after = database.connection().execute("SELECT * FROM notifications").fetchall()
     assert rows_preserved(before, after)
     assert after[0]["time_before"] is None
+
+
+def test_a_database_predating_notified_performances_gains_the_column(tmp_path):
+    database = legacy_database(tmp_path / "legacy.db")
+    before = database.connection().execute("SELECT * FROM notifications").fetchall()
+
+    migrations.apply(database)
+
+    assert "notified_performances" in columns(database, "notifications")
+    after = database.connection().execute("SELECT * FROM notifications").fetchall()
+    assert rows_preserved(before, after)
+    assert after[0]["notified_performances"] is None

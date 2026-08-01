@@ -128,9 +128,45 @@ deleted. Created closer to the session than `time_before`, it checks at once.
 The performance is validated against the calendar API, so a bad
 `performance_ak` gives 404 and a side that isn't sold gives 400.
 
+- `any_quiet_session` — the same idea, but for *any* session of a given kind
+  rather than one you have already picked out. It names a title and a side
+  instead of a performance, and pushes for every matching session that is quiet
+  within the next `time_before` hours:
+
+```json
+{
+  "notification_type": "any_quiet_session",
+  "title": "Advanced Surf",
+  "side": "right",
+  "minimum_slots": 8,
+  "time_before": "24h"
+}
+```
+
+`performance_ak`, `date` and `time` are neither required nor accepted here —
+there is no one session to name — and `title`, which every other type reads off
+the calendar, is required instead. Each matching session is pushed for at most
+once, ever; a session that goes quiet, fills up and goes quiet again does not
+push twice.
+
+Titles are matched case-insensitively but otherwise literally, so
+`"Advanced Surf"` matches neither `"Advanced Surf Lesson"` nor
+`"Advanced Coaching (In Water)"` — the parenthesised parts upstream uses are
+what tell two session types apart. Send the title exactly as the calendar
+spells it.
+
+Nothing is validated against the calendar: no lookup, no 404, no 400, and
+creation works during an upstream outage. Titles come and go seasonally and the
+row outlives any one of them, so watching for a title that is not currently
+scheduled is legitimate — the cost is that a typo silently never fires.
+
+This is the one type with no session to expire against, so it is **never
+deleted automatically**. It scans until the client deletes it.
+
 Responses carry `thresholds` only for `below_threshold`, `minimum_slots` and
-`time_before` only for `quiet_session`, and `last_checked_availability` only
-once the worker has read it:
+`time_before` only for the two quiet types, and `last_checked_availability`
+only once the worker has read it. `performance_ak`, `date` and `time` are
+always present, empty for an `any_quiet_session`:
 
 ```json
 {
@@ -177,15 +213,20 @@ string needs an app release. `tests/test_push.py` pins them.
 title  "Advanced Surf: 5th Jan at 18:00"
 body   "Availability dropped to 3 on the right"      (below_threshold)
        "A session has become available"              (above_zero)
-       "Quiet session: 12 slots remaining on the right"  (quiet_session)
+       "Quiet session: 12 slots remaining on the right"  (both quiet types)
 data   performance_ak, date, time, side, session_title, availability,
        notification_type, notification_id, threshold, minimum_slots
 ```
 
 `threshold` is the count at or below which `below_threshold` fires;
-`minimum_slots` is the count at or above which `quiet_session` does. Opposite
+`minimum_slots` is the count at or above which the quiet types do. Opposite
 senses, so they are separate keys — each is `""` for the types it does not
 apply to.
+
+An `any_quiet_session` push describes the session that matched, not the row:
+`performance_ak`, `date`, `time` and `session_title` are the matched session's,
+so the app can deep-link it. They will not correspond to any notification the
+app holds locally, since the row itself stores none of them.
 
 A token FCM reports as unregistered, or as belonging to another Firebase
 project, is deleted.
@@ -204,18 +245,32 @@ seat count at that moment it retries for 30 minutes and is then abandoned
 unfired, since a "starting soon, and quiet" push hours late would describe a
 seat count that no longer means what the user asked about.
 
+`any_quiet_session` opts out too, on the opposite grounds: it watches a window
+rather than one session, so neither "days until" nor "seats left" is defined for
+it. It rescans every `ROLLING_SCAN_MINUTES` (5), scheduled onto a fixed grid
+rather than `now + 5min` so that every rolling row comes due in the same cycle
+and shares one calendar fetch — the upstream cost stays flat as rows are added.
+A window is at most three calendar days, and the upstream proxy caches days for
+`CACHE_TTL_SECONDS`, so most scans are served without touching The Wave.
+
 ## Maintenance
 
 ```bash
 docker exec thewave-notifications-worker uv run python -m src.admin list
 docker exec thewave-notifications-worker uv run python -m src.admin delete-client <uuid> [--token]
 docker exec thewave-notifications-worker uv run python -m src.admin clear-thresholds
+docker exec thewave-notifications-worker uv run python -m src.admin clear-notified
 docker exec thewave-notifications-worker uv run python -m src.admin prune-tokenless [--dry-run]
 ```
 
-`clear-thresholds` re-arms every `below_threshold` notification (useful for
-testing delivery). `prune-tokenless` drops notifications whose client has no
-token, and client rows whose token is blank.
+`clear-thresholds` re-arms every `below_threshold` notification and
+`clear-notified` every `any_quiet_session` (both useful for testing delivery).
+`prune-tokenless` drops notifications whose client has no token, and client rows
+whose token is blank.
+
+`prune-tokenless` matters more than it used to: `any_quiet_session` is the first
+type that never deletes itself, so an uninstalled app leaves a row scanning
+every five minutes indefinitely.
 
 ## Schema
 
@@ -223,9 +278,9 @@ token, and client rows whose token is blank.
 CREATE TABLE notifications (
     client_id TEXT NOT NULL,
     notification_id TEXT NOT NULL,
-    performance_ak TEXT NOT NULL,
-    date TEXT NOT NULL,               -- session date, Europe/London
-    time TEXT NOT NULL,               -- HH:MM, Europe/London
+    performance_ak TEXT NOT NULL,     -- '' for any_quiet_session
+    date TEXT NOT NULL,               -- session date, Europe/London; '' as above
+    time TEXT NOT NULL,               -- HH:MM, Europe/London; '' as above
     side TEXT NOT NULL,
     title TEXT NOT NULL,
     notification_type TEXT NOT NULL,
@@ -234,8 +289,10 @@ CREATE TABLE notifications (
     last_checked_availability INTEGER,
     created_at TEXT NOT NULL,         -- naive UTC ISO-8601
     next_check_at TEXT,               -- 'YYYY-MM-DD HH:MM:SS' UTC
-    minimum_slots INTEGER,            -- quiet_session only, fires at or above
-    time_before TEXT,                 -- e.g. '24h', quiet_session only
+    minimum_slots INTEGER,            -- quiet types only, fires at or above
+    time_before TEXT,                 -- e.g. '24h', quiet types only
+    notified_performances TEXT,       -- JSON object of performance_ak -> session
+                                      -- date, any_quiet_session only
     PRIMARY KEY (client_id, notification_id)
 );
 
@@ -246,3 +303,10 @@ CREATE TABLE clients (
     alias TEXT                        -- set out of band; the dashboard's label
 );
 ```
+
+Migrations live in `migrations.py` as code, tracked by `PRAGMA user_version`,
+and are additive only — the dashboard attaches this database read-only. That is
+why `any_quiet_session` stores `''` in the three `NOT NULL` columns that
+identify a session rather than relaxing them: dropping a constraint means
+rebuilding the table. `clock` reads `''` as unparseable, so nothing mistakes
+such a row for a dated one.

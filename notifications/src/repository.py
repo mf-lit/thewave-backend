@@ -10,11 +10,12 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from typing import Iterable, List, Optional, Sequence
+from typing import Iterable, List, Mapping, Optional, Sequence
 
 from . import clock
 from .db import Database
 from .models import (
+    ANY_QUIET_SESSION,
     BELOW_THRESHOLD,
     QUIET_SESSION,
     Notification,
@@ -28,7 +29,7 @@ _SELECT = """
 SELECT client_id, notification_id, performance_ak, date, time, side, title,
        notification_type, thresholds, notified_thresholds,
        last_checked_availability, next_check_at, created_at,
-       minimum_slots, time_before
+       minimum_slots, time_before, notified_performances
 FROM notifications
 """
 
@@ -41,6 +42,7 @@ class NotificationRepository:
         notification_id = str(uuid.uuid4())
         created_at = clock.utc_now_iso()
         is_threshold = request.notification_type == BELOW_THRESHOLD
+        is_rolling = request.notification_type == ANY_QUIET_SESSION
         next_check_at = self._first_check_at(request)
 
         with self.db.transaction() as conn:
@@ -50,8 +52,8 @@ class NotificationRepository:
                     client_id, notification_id, performance_ak, date, time, side,
                     title, notification_type, thresholds, notified_thresholds,
                     last_checked_availability, next_check_at, created_at,
-                    minimum_slots, time_before
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
+                    minimum_slots, time_before, notified_performances
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)
                 """,
                 (
                     client_id,
@@ -68,6 +70,7 @@ class NotificationRepository:
                     created_at,
                     request.minimum_slots,
                     request.time_before,
+                    json.dumps({}) if is_rolling else None,
                 ),
             )
 
@@ -86,16 +89,18 @@ class NotificationRepository:
             next_check_at=next_check_at,
             minimum_slots=request.minimum_slots,
             time_before=request.time_before,
+            notified_performances={},
         )
 
     @staticmethod
     def _first_check_at(request: NotificationRequest) -> Optional[str]:
         """When the worker should first look at this notification.
 
-        None for the types that are polled continuously — they are due at once.
-        A quiet_session is instead checked a single time, ``time_before`` the
-        session starts; a stamp already in the past is fine and simply means it
-        is due on the next cycle.
+        None for the types that are polled continuously — they are due at once,
+        and an any_quiet_session has no session to count back from, so it falls
+        into that group too. A quiet_session is instead checked a single time,
+        ``time_before`` the session starts; a stamp already in the past is fine
+        and simply means it is due on the next cycle.
         """
         if request.notification_type != QUIET_SESSION:
             return None
@@ -190,6 +195,35 @@ class NotificationRepository:
                     notification.notification_id,
                 ),
             )
+
+    def record_notified_performances(
+        self, notification: Notification, performances: Mapping[str, str]
+    ) -> None:
+        """Remember the sessions an any_quiet_session row has already fired for.
+
+        Written before the pushes go out, the same way `record_check` records a
+        reading before one: a crash between the two costs a notification, which
+        is the trade this service already prefers over a duplicate.
+        """
+        with self.db.transaction() as conn:
+            conn.execute(
+                "UPDATE notifications SET notified_performances = ? "
+                "WHERE client_id = ? AND notification_id = ?",
+                (
+                    json.dumps(dict(performances)),
+                    notification.client_id,
+                    notification.notification_id,
+                ),
+            )
+
+    def clear_notified_performances(self) -> int:
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                "UPDATE notifications SET notified_performances = '{}' "
+                "WHERE notification_type = ?",
+                (ANY_QUIET_SESSION,),
+            )
+        return cursor.rowcount
 
     def clear_notified_thresholds(self) -> int:
         with self.db.transaction() as conn:

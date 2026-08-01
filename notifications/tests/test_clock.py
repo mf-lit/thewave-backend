@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 
+import pytest
+
 from src import clock
 
 
@@ -103,3 +105,78 @@ def test_just_after_start_lands_past_the_session():
 
 def test_just_after_start_is_none_for_an_unparseable_session():
     assert clock.just_after_start("2026-07-30", "8pm") is None
+
+
+# -- rolling windows ----------------------------------------------------------
+
+NOW = utc(2026, 7, 31, 10, 7)  # 11:07 London, BST
+
+
+@pytest.mark.parametrize(
+    "date, time, expected",
+    [
+        ("2026-08-01", "10:00", True),    # +23h
+        ("2026-07-31", "11:08", True),    # a minute away
+        ("2026-08-01", "12:00", False),   # +25h, past the window
+        ("2026-07-31", "09:00", False),   # already started
+    ],
+)
+def test_within_hours_bounds_the_window_at_both_ends(date, time, expected):
+    assert clock.within_hours(date, time, 24, now=NOW) is expected
+
+
+def test_within_hours_includes_a_session_exactly_on_the_far_edge():
+    assert clock.within_hours("2026-08-01", "11:07", 24, now=NOW) is True
+
+
+def test_the_near_edge_agrees_with_is_past():
+    """A session starting exactly now is in the window and not yet past.
+
+    `within_hours` uses <= at the near edge and `is_past` uses <, so there is
+    neither a moment where both are true nor a gap where neither is.
+    """
+    assert clock.within_hours("2026-07-31", "11:07", 24, now=NOW) is True
+    assert clock.is_past("2026-07-31", "11:07", now=NOW) is False
+
+    a_second_later = utc(2026, 7, 31, 10, 7).replace(second=1)
+    assert clock.within_hours("2026-07-31", "11:07", 24, now=a_second_later) is False
+    assert clock.is_past("2026-07-31", "11:07", now=a_second_later) is True
+
+
+@pytest.mark.parametrize("date, time, hours", [("", "", 24), ("2026-08-01", "8pm", 24),
+                                               ("2026-08-01", "10:00", None)])
+def test_within_hours_is_false_for_anything_it_cannot_read(date, time, hours):
+    assert clock.within_hours(date, time, hours, now=NOW) is False
+
+
+def test_dates_within_covers_the_days_the_window_touches():
+    assert clock.dates_within(24, now=NOW) == ["2026-07-31", "2026-08-01"]
+    assert clock.dates_within(48, now=NOW) == ["2026-07-31", "2026-08-01", "2026-08-02"]
+
+
+def test_dates_within_never_exceeds_three_days_at_the_maximum():
+    assert len(clock.dates_within(48, now=utc(2026, 7, 31, 23, 30))) <= 3
+
+
+@pytest.mark.parametrize("now", [utc(2026, 10, 24, 20, 0), utc(2026, 3, 28, 20, 0)])
+def test_dates_within_spans_a_clock_change(now):
+    """October adds an hour and March loses one; neither may drop a day."""
+    dates = clock.dates_within(48, now=now)
+    assert len(dates) == 3
+    assert dates == sorted(dates)
+
+
+def test_next_slot_lands_on_the_grid_not_a_fixed_offset():
+    assert clock.next_slot(5, now=utc(2026, 7, 31, 10, 7)) == "2026-07-31 10:10:00"
+    assert clock.next_slot(5, now=utc(2026, 7, 31, 10, 6)) == "2026-07-31 10:10:00"
+
+
+def test_next_slot_is_always_in_the_future():
+    """On a boundary it moves to the next one, so a scan cannot busy-loop."""
+    assert clock.next_slot(5, now=utc(2026, 7, 31, 10, 5)) == "2026-07-31 10:10:00"
+
+
+def test_rows_woken_minutes_apart_converge_on_one_slot():
+    """This is what lets every rolling row share a single calendar fetch."""
+    slots = {clock.next_slot(5, now=utc(2026, 7, 31, 10, m)) for m in (6, 7, 8, 9)}
+    assert slots == {"2026-07-31 10:10:00"}

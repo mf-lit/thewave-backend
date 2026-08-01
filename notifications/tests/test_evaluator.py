@@ -3,8 +3,14 @@ from __future__ import annotations
 
 import pytest
 
-from src.evaluator import evaluate
-from src.models import ABOVE_ZERO, BELOW_THRESHOLD, QUIET_SESSION, Notification
+from src.evaluator import evaluate, evaluate_any_quiet
+from src.models import (
+    ABOVE_ZERO,
+    ANY_QUIET_SESSION,
+    BELOW_THRESHOLD,
+    QUIET_SESSION,
+    Notification,
+)
 
 
 def notification(**overrides) -> Notification:
@@ -149,3 +155,53 @@ def test_quiet_session_without_a_minimum_never_notifies():
 
 def test_a_zero_minimum_fires_on_any_availability():
     assert evaluate(quiet(minimum_slots=0), 0).notify is True
+
+
+# -- any_quiet_session --------------------------------------------------------
+
+def rolling(**overrides) -> Notification:
+    base = dict(
+        notification_type=ANY_QUIET_SESSION,
+        performance_ak="",
+        date="",
+        time="",
+        thresholds=None,
+        minimum_slots=8,
+        time_before="24h",
+    )
+    base.update(overrides)
+    return notification(**base)
+
+
+def test_any_quiet_fires_at_exactly_the_minimum():
+    decision = evaluate_any_quiet(rolling(), "P1", 8)
+    assert decision.notify
+    assert decision.message == "Session is quiet: 8 slots remaining (minimum 8)"
+
+
+def test_any_quiet_stays_silent_below_the_minimum():
+    assert evaluate_any_quiet(rolling(), "P1", 7).notify is False
+
+
+def test_any_quiet_never_fires_twice_for_one_session():
+    already = rolling(notified_performances={"P1": "2026-08-05"})
+    assert evaluate_any_quiet(already, "P1", 20).notify is False
+
+
+def test_any_quiet_still_fires_for_a_session_it_has_not_seen():
+    already = rolling(notified_performances={"P1": "2026-08-05"})
+    assert evaluate_any_quiet(already, "P2", 20).notify is True
+
+
+def test_any_quiet_without_a_minimum_never_notifies():
+    """A malformed row must return a decision, not raise into the check cycle."""
+    assert evaluate_any_quiet(rolling(minimum_slots=None), "P1", 20).notify is False
+
+
+def test_any_quiet_ignores_the_last_reading():
+    """The opposite of quiet_session: the fired-flag is per session, not per row."""
+    assert evaluate_any_quiet(rolling(last_checked_availability=20), "P1", 20).notify is True
+
+
+def test_a_zero_minimum_fires_on_a_sold_out_session():
+    assert evaluate_any_quiet(rolling(minimum_slots=0), "P1", 0).notify is True

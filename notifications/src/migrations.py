@@ -90,9 +90,25 @@ def _migration_002_quiet_session(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "notifications", "time_before", "TEXT")
 
 
+def _migration_003_any_quiet_session(conn: sqlite3.Connection) -> None:
+    """The repeat guard for any_quiet_session.
+
+    A JSON *object* of performance_ak -> session date, not the JSON array
+    ``notified_thresholds`` uses. That row watches one session and can name its
+    thresholds up front; this one watches a rolling window and cannot know
+    which sessions it will fire for, so it accumulates them. The stored date is
+    what lets an entry be dropped once its session is over, keeping the map
+    bounded on a row that outlives every session it notifies about — pruning
+    against what happens to be visible in the calendar instead would re-notify
+    the moment upstream returned a short response.
+    """
+    _add_column_if_missing(conn, "notifications", "notified_performances", "TEXT")
+
+
 MIGRATIONS: List[Tuple[int, Callable[[sqlite3.Connection], None]]] = [
     (1, _migration_001_baseline),
     (2, _migration_002_quiet_session),
+    (3, _migration_003_any_quiet_session),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]

@@ -5,11 +5,19 @@ the app is backgrounded, so changing any string here requires an app release.
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 import logging
 
 import pytest
 
-from src.models import ABOVE_ZERO, BELOW_THRESHOLD, QUIET_SESSION, Notification
+from src.models import (
+    ABOVE_ZERO,
+    ANY_QUIET_SESSION,
+    BELOW_THRESHOLD,
+    QUIET_SESSION,
+    Notification,
+)
 from src.push import (
     Notifier,
     PushError,
@@ -186,3 +194,21 @@ def test_a_rejected_token_is_not_logged_either(services, sender, caplog):
 def test_notifier_uses_a_fake_sender_only(sender):
     """Guard against the suite ever reaching the real Firebase SDK."""
     assert type(sender).__name__ == "FakeSender"
+
+
+def test_any_quiet_session_shares_the_quiet_session_body():
+    """One sentence for both: the title line already names the session."""
+    title, body = display_strings(notification(notification_type=ANY_QUIET_SESSION), 12)
+    assert body == "Quiet session: 12 slots remaining on the right"
+
+
+def test_a_rolling_push_describes_the_matched_session():
+    """The worker hands the notifier a copy carrying the session's identity."""
+    row = notification(
+        notification_type=ANY_QUIET_SESSION, performance_ak="", date="", time=""
+    )
+    matched = replace(row, performance_ak="P9", date="2026-01-05", time="18:00")
+
+    title, _ = display_strings(matched, 12)
+    assert title == "Advanced Surf: 5th Jan at 18:00"
+    assert data_payload(matched, 12, None)["performance_ak"] == "P9"

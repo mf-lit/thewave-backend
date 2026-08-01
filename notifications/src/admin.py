@@ -38,8 +38,10 @@ def _print_table(notifications: List[Notification], tokens: set) -> None:
     headers = ("DATE", "TIME", "SIDE", "TYPE", "AVAIL", "FIRES AT", "TITLE", "CLIENT", "PUSH")
     rows = [
         (
-            n.date,
-            n.time,
+            # An any_quiet_session row watches a window rather than a session,
+            # so it stores neither; show its horizon in place of a start time.
+            n.date or "-",
+            n.time or n.time_before or "-",
             n.side,
             n.notification_type,
             "-" if n.last_checked_availability is None else str(n.last_checked_availability),
@@ -81,6 +83,13 @@ def cmd_clear_thresholds(services: Services, _args) -> int:
     """Re-arm every below_threshold notification so it can fire again."""
     count = services.notifications.clear_notified_thresholds()
     print(f"Cleared notified_thresholds on {count} notification(s).")
+    return 0
+
+
+def cmd_clear_notified(services: Services, _args) -> int:
+    """Re-arm every any_quiet_session so it can fire for its sessions again."""
+    count = services.notifications.clear_notified_performances()
+    print(f"Cleared notified_performances on {count} notification(s).")
     return 0
 
 
@@ -130,6 +139,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     clear = sub.add_parser("clear-thresholds", help="re-arm all below_threshold notifications")
     clear.set_defaults(handler=cmd_clear_thresholds)
+
+    clear_notified = sub.add_parser(
+        "clear-notified", help="re-arm all any_quiet_session notifications"
+    )
+    clear_notified.set_defaults(handler=cmd_clear_notified)
 
     prune = sub.add_parser("prune-tokenless", help="delete undeliverable notifications")
     prune.add_argument("--dry-run", action="store_true", help="report without deleting")

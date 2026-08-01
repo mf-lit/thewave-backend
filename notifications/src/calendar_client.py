@@ -16,6 +16,8 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from .models import ValidationError, normalize_time, normalize_title
+
 logger = logging.getLogger(__name__)
 
 REQUEST_TIMEOUT = 30
@@ -38,6 +40,67 @@ class CalendarData:
                 if performance.get("performanceAK") == performance_ak:
                     return performance
         return None
+
+
+@dataclass(frozen=True)
+class Session:
+    """One performance seen from the point of view of one side."""
+
+    date: str  # YYYY-MM-DD, Europe/London
+    time: str  # canonical HH:MM
+    performance_ak: str
+    title: str  # upstream's own casing, for display
+    availability: int  # seats on the side that was asked for
+
+
+def matching_sessions(data: CalendarData, title: str, side: str) -> List[Session]:
+    """Every performance in ``data`` whose title and side match, soonest first.
+
+    The counterpart to `find_performance` for watches that name a kind of
+    session rather than one session. Titles are compared with
+    `models.normalize_title`, which folds case and nothing else, so
+    "Advanced Surf" never matches "Advanced Surf Lesson".
+
+    ``date`` comes from the day the performance was returned under rather than
+    ``performance["date"]``: that is the key `fetch_dates` filters on, and it
+    is present in every payload shape this service has seen.
+    """
+    wanted = normalize_title(title)
+    if not wanted:
+        return []
+
+    sessions: List[Session] = []
+    for day in data.days:
+        date = day.get("date")
+        if not date:
+            continue
+        for performance in day.get("performances", []):
+            upstream_title = performance_title(performance)
+            if normalize_title(upstream_title) != wanted:
+                continue
+            performance_ak = performance.get("performanceAK")
+            availability = availability_for_side(performance, side)
+            if not performance_ak or availability is None:
+                continue
+            try:
+                start = normalize_time(performance.get("time"))
+            except ValidationError:
+                logger.warning(
+                    "Skipping performance %s: unreadable time %r",
+                    performance_ak,
+                    performance.get("time"),
+                )
+                continue
+            sessions.append(
+                Session(
+                    date=date,
+                    time=start,
+                    performance_ak=performance_ak,
+                    title=upstream_title,
+                    availability=availability,
+                )
+            )
+    return sorted(sessions, key=lambda s: (s.date, s.time))
 
 
 def availability_for_side(performance: Dict, side: str) -> Optional[int]:

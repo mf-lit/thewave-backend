@@ -13,7 +13,7 @@ from flask import Blueprint, current_app, jsonify, request
 
 from ..calendar_client import CalendarError, availability_for_side, performance_title
 from ..fcm_token import validate_fcm_token
-from ..models import NotificationRequest, ValidationError
+from ..models import ANY_QUIET_SESSION, NotificationRequest, ValidationError
 from .auth import require_api_key
 from .handlers import ApiError
 
@@ -47,14 +47,8 @@ def _json_body() -> dict:
     return body
 
 
-@bp.route("/clients/<client_id>/notifications", methods=["POST"])
-@require_api_key
-def create_notification(client_id: str):
-    _uuid_or_400(client_id, "client_id")
-    payload = _json_body()
-    notification_request = NotificationRequest.from_payload(payload)
-
-    app = services()
+def _title_from_calendar(app, notification_request: NotificationRequest) -> str:
+    """Check the named performance exists and sells the side, and take its title."""
     try:
         calendar = app.calendar.fetch_day(notification_request.date)
     except CalendarError as exc:
@@ -74,15 +68,35 @@ def create_notification(client_id: str):
             400,
         )
 
-    notification = app.notifications.create(
-        client_id, notification_request, performance_title(performance)
+    return performance_title(performance)
+
+
+@bp.route("/clients/<client_id>/notifications", methods=["POST"])
+@require_api_key
+def create_notification(client_id: str):
+    _uuid_or_400(client_id, "client_id")
+    payload = _json_body()
+    notification_request = NotificationRequest.from_payload(payload)
+
+    app = services()
+    # A rolling watch names a title, not a session, so there is nothing to look
+    # up: no calendar call, no 404, no 400, and creation survives an upstream
+    # outage. The title is deliberately not checked against the schedule either
+    # — titles come and go seasonally and the row outlives any one of them, so
+    # watching for one that isn't currently running is a legitimate request.
+    title = (
+        notification_request.title
+        if notification_request.notification_type == ANY_QUIET_SESSION
+        else _title_from_calendar(app, notification_request)
     )
+
+    notification = app.notifications.create(client_id, notification_request, title)
     logger.info(
         "Created notification %s for client %s (%s %s %s, %s)",
         notification.notification_id,
         client_id,
-        notification.date,
-        notification.time,
+        notification.date or "rolling",
+        notification.time or notification.time_before,
         notification.side,
         notification.notification_type,
     )

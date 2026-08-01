@@ -7,14 +7,16 @@ touches the production file.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import pytest
 import yaml
 
 from src.api.app import create_app
 from src.calendar_client import CalendarData
+from src.clock import LONDON
 from src.push import PushMessage
 from src.services import Services
 from src.settings import Settings
@@ -44,6 +46,16 @@ def make_performance(
 
 def make_day(date: str, performances: List[Dict]) -> Dict:
     return {"date": date, "performances": performances}
+
+
+def soon(hours: float) -> Tuple[str, str]:
+    """A session ``hours`` from now, as a (date, time) pair in London.
+
+    Rolling watches are judged against the wall clock rather than a fixed
+    future date, so their tests have to build days relative to now.
+    """
+    moment = datetime.now(timezone.utc).astimezone(LONDON) + timedelta(hours=hours)
+    return moment.strftime("%Y-%m-%d"), moment.strftime("%H:%M")
 
 
 class FakeCalendar:
