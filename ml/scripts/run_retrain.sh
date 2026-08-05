@@ -16,4 +16,4 @@ cd "$REPO_DIR"
 mkdir -p logs
 
 echo "=== retrain run $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
-uv run retrain-lake "$@"
+/home/marc/.local/bin/uv run retrain-lake "$@"

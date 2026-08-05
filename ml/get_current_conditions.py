@@ -25,16 +25,43 @@ current_temp = data["current"]["temp_c"]
 feelslike_temp = data["current"]["feelslike_c"]
 
 # Wave Water Temperature
-url = "https://www.thewave.com/"
-response = requests.get(url, headers=headers)
-soup = bs.BeautifulSoup(response.content, "html5lib")
+# The site's own weather endpoint, referenced by the homepage's client-side
+# state. Returns the same values the page renders, without the markup.
+weather_api_url = "https://www.thewave.com/wp-json/wave/v1/weather"
 
-marker = soup.find("p", string=re.compile("Water:.*"))
-water_temp = float(re.sub("[^0-9.]", "", marker.text.strip()))
-air_temp = marker.find_previous("p")
-conditions = air_temp.find_previous("p")
-air_temp = float(re.sub("[^0-9.]", "", air_temp.text.strip()))
-conditions = conditions.text.strip().rstrip(" &")
+
+def parse_temp(value):
+    match = re.search(r"-?\d+(?:\.\d+)?", value or "")
+    if not match:
+        raise ValueError(f"Could not parse temperature from {value!r}")
+    return float(match.group())
+
+
+try:
+    response = requests.get(weather_api_url, headers=headers)
+    response.raise_for_status()
+    payload = response.json()
+    water_temp = parse_temp(payload["waterTemp"])
+    air_temp = parse_temp(payload["current"]["temp"])
+    conditions = payload["current"]["description"].strip().rstrip(" &")
+except Exception:
+    # Fallback: scrape the homepage. The values sit in a block of sibling
+    # <p> tags with numbers wrapped in <span data-wp-text="..."> bindings, so
+    # the <p> tags have mixed content and must be matched on their full text
+    # rather than BeautifulSoup's `string=` filter, which only matches
+    # single-string tags.
+    url = "https://www.thewave.com/"
+    response = requests.get(url, headers=headers)
+    soup = bs.BeautifulSoup(response.content, "html5lib")
+
+    marker = soup.find(
+        lambda tag: tag.name == "p" and tag.get_text().strip().startswith("Water:")
+    )
+    water_temp = parse_temp(marker.get_text())
+    air_temp = marker.find_previous("p")
+    conditions = air_temp.find_previous("p")
+    air_temp = parse_temp(air_temp.get_text())
+    conditions = conditions.get_text().strip().rstrip(" &")
 
 # Time now
 datetime = datetime.now().isoformat()
