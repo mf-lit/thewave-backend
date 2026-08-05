@@ -4,3 +4,5 @@ __pycache__/
 .env
 *.db
 data/
+# Cron writes snapshot.log here (host-side, outside the container's volume).
+/logs/

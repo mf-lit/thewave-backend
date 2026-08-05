@@ -40,4 +40,5 @@ Dockerfile
 
 # Local data not needed at runtime
 data/
+logs/
 .claude/
