@@ -1,0 +1,10 @@
+{
+  "model": "gru",
+  "selection_rule": "retrain: strictly lower test+audit MAE vs incumbent on rolling split",
+  "test_mae": 0.3659860964738186,
+  "audit_mae": 0.33489253739209485,
+  "test_skill_vs_persistence": 0.7578237394709593,
+  "audit_skill_vs_persistence": 0.7362896731202526,
+  "trained_at": "2026-06-06T16:46:59.559432+00:00",
+  "archived_previous": "20260606T164659Z"
+}
