@@ -64,7 +64,7 @@ services:
       # Optional: Override port (default: 5000)
       - PORT=5000
       # Optional: Cache configuration
-      - CACHE_TTL_SECONDS=1201
+      - CACHE_TTL_SECONDS=540
       
       # Optional: Forecast and temperature settings
       # - FORECAST_RELOAD_HOUR=1
@@ -141,7 +141,8 @@ services:
       dockerfile: Dockerfile
     container_name: thewave-dashboard
     ports:
-      - "5002:5002"
+      # Admin-only tool: bind to the Tailscale interface, not the LAN.
+      - "${TAILSCALE_IP}:5002:5002"
     volumes:
       # Not mounted :ro — these DBs are WAL-mode, so even read-only queries need
       # to create -wal/-shm sidecar files in the directory (see sqlite-web below,
@@ -166,7 +167,8 @@ services:
     container_name: sqlite-web
     restart: unless-stopped
     ports:
-      - 5003:8080
+      # No auth in sqlite-web itself: bind to the Tailscale interface, not the LAN.
+      - "${TAILSCALE_IP}:5003:8080"
     volumes:
       - /thewave/docker_vols/notifications/data:/notifications/data
       - /thewave/docker_vols/upstream-api/data:/upstream-api/data
