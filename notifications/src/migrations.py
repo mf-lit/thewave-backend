@@ -105,10 +105,32 @@ def _migration_003_any_quiet_session(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "notifications", "notified_performances", "TEXT")
 
 
+def _migration_004_session_filters(conn: sqlite3.Connection) -> None:
+    """The day and time-of-day filters for any_quiet_session.
+
+    All three are nullable and NULL means "no filter on this axis", which is
+    what every row written before this migration reads as — the type's existing
+    behaviour is the behaviour of a row with none of them set.
+
+    ``days`` is a JSON *array* of canonical short names ('["sat","sun"]') rather
+    than a bitmask or a set of seven boolean columns, for the same reason
+    ``time_before`` holds "24h" and not an hour count: the column has to mean
+    something on its own to whoever is reading the table in sqlite-web.
+
+    ``not_before``/``not_after`` are canonical HH:MM in Europe/London wall-clock,
+    the same convention as the ``time`` column, so they are directly comparable
+    with a session's start time without either being parsed.
+    """
+    _add_column_if_missing(conn, "notifications", "days", "TEXT")
+    _add_column_if_missing(conn, "notifications", "not_before", "TEXT")
+    _add_column_if_missing(conn, "notifications", "not_after", "TEXT")
+
+
 MIGRATIONS: List[Tuple[int, Callable[[sqlite3.Connection], None]]] = [
     (1, _migration_001_baseline),
     (2, _migration_002_quiet_session),
     (3, _migration_003_any_quiet_session),
+    (4, _migration_004_session_filters),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]

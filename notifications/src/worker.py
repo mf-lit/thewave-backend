@@ -73,6 +73,25 @@ def _window_hours(notification: Notification) -> Optional[int]:
     return None if hours is None else min(hours, MAX_TIME_BEFORE_HOURS)
 
 
+def _unreadable_filter(notification: Notification) -> Optional[str]:
+    """Why a rolling watch cannot be scanned this cycle, or None if it can.
+
+    Both columns are read back tolerantly rather than strictly, so a row a hand
+    has been in reaches here rather than raising. An unreadable filter is not
+    the same as an absent one: scanning without it would push for exactly the
+    sessions the user asked not to hear about, and this type is never deleted
+    server-side, so it would keep doing so. Skipping the scan is the quiet
+    failure; ignoring the filter is the loud one.
+    """
+    if _window_hours(notification) is None:
+        return f"unreadable time_before {notification.time_before!r}"
+    # `_decode_days` returns None for no filter and [] for one it could not
+    # make sense of, which is a value `normalize_days` refuses to write.
+    if notification.days == []:
+        return "unreadable days"
+    return None
+
+
 def _prune_past(remembered: Dict[str, str], today: Optional[str] = None) -> Dict[str, str]:
     """Forget sessions whose date has passed; they can never match again.
 
@@ -133,11 +152,24 @@ class Worker:
 
     @staticmethod
     def _scan_dates(notification: Notification) -> List[str]:
-        """The calendar days a rolling watch's window touches."""
+        """The calendar days a rolling watch's window touches and cares about.
+
+        Days the watch's filter excludes are dropped here as well as in the
+        scan itself. `matches_schedule` would reject their sessions anyway, so
+        this is only to avoid asking upstream for a day nothing can match — a
+        Saturdays-only watch running on a Tuesday otherwise pulls three days of
+        calendar to use none of it. Dates are unioned across every due row, so
+        it saves a fetch only when no other row wants that day.
+        """
         hours = _window_hours(notification)
         # An unreadable column contributes no dates; `_process_rolling` logs it
         # and reschedules rather than the whole cycle failing on one bad row.
-        return [] if hours is None else clock.dates_within(hours)
+        if hours is None or _unreadable_filter(notification):
+            return []
+        dates = clock.dates_within(hours)
+        if notification.days is None:
+            return dates
+        return [date for date in dates if clock.day_name(date) in notification.days]
 
     def process(self, notification: Notification, calendar: CalendarData) -> None:
         # Diverted before the is_past branch below, so "a rolling row is never
@@ -225,22 +257,34 @@ class Worker:
         repository = self.services.notifications
         next_check_at = clock.next_slot(scheduling.ROLLING_SCAN_MINUTES)
 
-        hours = _window_hours(notification)
-        if hours is None:
+        unreadable = _unreadable_filter(notification)
+        if unreadable:
             logger.warning(
-                "Notification %s has an unreadable time_before %r; skipping scan",
+                "Notification %s has an %s; skipping scan",
                 notification.notification_id,
-                notification.time_before,
+                unreadable,
             )
             repository.reschedule(notification, next_check_at)
             return
 
+        hours = _window_hours(notification)
         to_send = [
             session
             for session in matching_sessions(
                 calendar, notification.title, notification.side
             )
             if clock.within_hours(session.date, session.time, hours)
+            # Which sessions are candidates is a scheduling question, so the
+            # day and time-of-day filters sit here beside the window rather
+            # than in the evaluator, which only judges whether a candidate is
+            # quiet enough. See `evaluator.evaluate_any_quiet`.
+            and clock.matches_schedule(
+                session.date,
+                session.time,
+                notification.days,
+                notification.not_before,
+                notification.not_after,
+            )
             and evaluator.evaluate_any_quiet(
                 notification, session.performance_ak, session.availability
             ).notify

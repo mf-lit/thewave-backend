@@ -741,3 +741,130 @@ def test_a_notified_session_is_forgotten_once_its_date_has_passed(
     worker.run_once()
 
     assert set(stored(services, notification).notified_performances) == {"P3"}
+
+
+# -- day and time-of-day filters ----------------------------------------------
+
+# A Saturday. 08:00 UTC is 09:00 BST, so a session at 11:00 London is two hours
+# ahead and comfortably inside a 24h window that also reaches into Sunday.
+SATURDAY = datetime(2026, 8, 1, 8, 0, tzinfo=timezone.utc)
+
+
+@pytest.fixture
+def saturday(monkeypatch, calendar, services):
+    """Pin the clock, so a session's weekday and start time are not the test's guess."""
+    monkeypatch.setattr(clock, "now_utc", lambda: SATURDAY)
+    services.clients.upsert_token("client-1", VALID_TOKEN)
+    calendar.days = [
+        make_day("2026-08-01", [make_performance("P1", "Advanced Surf", "11:00", {"right": 9})])
+    ]
+    return calendar
+
+
+def test_a_session_on_an_allowed_day_still_pushes(worker, services, sender, saturday):
+    add_rolling(services, days=["sat", "sun"])
+
+    worker.run_once()
+
+    assert [m.data["performance_ak"] for m in sender.sent] == ["P1"]
+
+
+def test_a_session_on_an_excluded_day_is_not_pushed_for(
+    worker, services, sender, saturday
+):
+    notification = add_rolling(services, days=["mon", "tue"])
+
+    worker.run_once()
+
+    assert sender.sent == []
+    # Not remembered either: the session was never a candidate, so a later
+    # widening of the filter must still be able to fire for it.
+    assert stored(services, notification).notified_performances == {}
+
+
+def test_a_session_exactly_on_both_bounds_still_pushes(worker, services, sender, saturday):
+    """Both ends are inclusive: 'nothing before 11:00' includes an 11:00 session."""
+    add_rolling(services, not_before="11:00", not_after="11:00")
+
+    worker.run_once()
+
+    assert len(sender.sent) == 1
+
+
+def test_a_session_before_not_before_is_not_pushed_for(worker, services, sender, saturday):
+    add_rolling(services, not_before="12:00")
+
+    worker.run_once()
+
+    assert sender.sent == []
+
+
+def test_a_session_after_not_after_is_not_pushed_for(worker, services, sender, saturday):
+    add_rolling(services, not_after="10:00")
+
+    worker.run_once()
+
+    assert sender.sent == []
+
+
+def test_the_right_time_on_the_wrong_day_is_still_filtered(
+    worker, services, sender, saturday
+):
+    add_rolling(services, days=["sun"], not_before="09:00", not_after="13:00")
+
+    worker.run_once()
+
+    assert sender.sent == []
+
+
+def test_a_watch_with_no_filters_is_unchanged(worker, services, sender, saturday):
+    """Every row written before the filters existed reads as this one."""
+    notification = add_rolling(services)
+
+    worker.run_once()
+
+    assert len(sender.sent) == 1
+    assert set(stored(services, notification).notified_performances) == {"P1"}
+
+
+def test_a_corrupt_days_column_skips_the_scan_rather_than_ignoring_the_filter(
+    worker, services, sender, saturday
+):
+    """Scanning without it would push for exactly what the user excluded."""
+    notification = add_rolling(services, days=["mon"])
+    services.notifications.db.connection().execute(
+        "UPDATE notifications SET days = 'someday' WHERE notification_id = ?",
+        (notification.notification_id,),
+    )
+    services.notifications.db.connection().commit()
+
+    worker.run_once()
+
+    assert sender.sent == []
+    assert stored(services, notification).next_check_at is not None
+
+
+def test_a_corrupt_days_column_contributes_no_dates(services):
+    notification = add_rolling(services, days=["sat"])
+    assert Worker._scan_dates(replace(notification, days=[])) == []
+
+
+def test_the_scan_skips_days_the_filter_excludes(monkeypatch, services):
+    """A Saturdays-only watch must not pull Sunday's calendar to use none of it."""
+    monkeypatch.setattr(clock, "now_utc", lambda: SATURDAY)
+    notification = add_rolling(services, days=["sat"])
+    assert Worker._scan_dates(notification) == ["2026-08-01"]
+
+
+def test_an_unfiltered_scan_still_covers_the_whole_window(monkeypatch, services):
+    monkeypatch.setattr(clock, "now_utc", lambda: SATURDAY)
+    assert Worker._scan_dates(add_rolling(services)) == ["2026-08-01", "2026-08-02"]
+
+
+def test_the_filters_survive_a_round_trip_through_the_row(services):
+    notification = add_rolling(
+        services, days=["SUN", "sat"], not_before="9:00", not_after="13:00"
+    )
+    row = stored(services, notification)
+    assert row.days == ["sat", "sun"]
+    assert (row.not_before, row.not_after) == ("09:00", "13:00")

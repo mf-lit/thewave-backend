@@ -16,8 +16,10 @@ was and past sessions lingered before being deleted.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import List, Optional, Sequence
 from zoneinfo import ZoneInfo
+
+from .models import VALID_DAYS
 
 LONDON = ZoneInfo("Europe/London")
 
@@ -90,6 +92,56 @@ def within_hours(
         return False
     moment = now or now_utc()
     return moment <= start <= moment + timedelta(hours=hours)
+
+
+def day_name(date_str: str) -> Optional[str]:
+    """The short weekday name of a London-local calendar date, or None.
+
+    Read off the local date as written, not off any instant derived from it:
+    every ``date`` in this service — on a notification, on a `Session`, out of
+    `dates_within` — is already the London calendar day, and converting one to
+    UTC first is how a Sunday 00:30 BST session becomes a Saturday.
+    """
+    try:
+        return VALID_DAYS[datetime.strptime(date_str, DATE_FORMAT).weekday()]
+    except (TypeError, ValueError):
+        return None
+
+
+def matches_schedule(
+    date_str: str,
+    time_str: str,
+    days: Optional[Sequence[str]] = None,
+    not_before: Optional[str] = None,
+    not_after: Optional[str] = None,
+) -> bool:
+    """Whether a session falls on an allowed day, inside an allowed time range.
+
+    The optional narrowing a rolling watch may carry, tested against the
+    session's *start*. A filter left as None passes everything, so a watch with
+    none of them set matches every session — this is a narrowing of
+    `within_hours`, never a widening of it.
+
+    Both bounds are inclusive: a user who asks for nothing before 09:00 means a
+    09:00 session is fine. The comparison is a string one, which is exact
+    because both sides are canonical zero-padded HH:MM — `Session.time` is
+    normalised on the way out of the calendar and `not_before`/`not_after` on
+    the way into the database.
+
+    Unparseable input matches nothing, as in `within_hours`, so the empty date
+    and time on an any_quiet_session row can never make it look like a match.
+    """
+    start = session_start(date_str, time_str)
+    if start is None:
+        return False
+    if days is not None and day_name(date_str) not in days:
+        return False
+    local = start.strftime("%H:%M")
+    if not_before is not None and local < not_before:
+        return False
+    if not_after is not None and local > not_after:
+        return False
+    return True
 
 
 def dates_within(hours: int, now: Optional[datetime] = None) -> List[str]:

@@ -6,11 +6,14 @@ import re
 import pytest
 
 from src.models import (
+    VALID_DAYS,
     Notification,
     NotificationRequest,
     ValidationError,
+    _decode_days,
     _decode_json_map,
     duration_hours,
+    normalize_days,
     normalize_duration,
     normalize_time,
     normalize_title,
@@ -378,3 +381,190 @@ def test_decode_json_map_returns_an_empty_map_for_anything_unusable(given):
 def test_decode_json_map_round_trips_and_coerces_to_strings():
     assert _decode_json_map('{"P1": "2026-08-05"}') == {"P1": "2026-08-05"}
     assert _decode_json_map({"P1": 2026}) == {"P1": "2026"}
+
+
+# -- normalize_days -----------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "given, expected",
+    [
+        (["mon"], ["mon"]),
+        (["SAT", "sun"], ["sat", "sun"]),
+        (["  Sat  "], ["sat"]),
+        (["sun", "sat", "sun"], ["sat", "sun"]),
+        (["sun", "mon", "sat"], ["mon", "sat", "sun"]),
+        (list(VALID_DAYS)[::-1], list(VALID_DAYS)),
+    ],
+)
+def test_normalize_days_canonicalises_case_order_and_duplicates(given, expected):
+    assert normalize_days(given) == expected
+
+
+def test_normalize_days_returns_calendar_order_not_the_order_given():
+    """Two watches for the same weekends must produce the same stored value."""
+    assert normalize_days(["sun", "sat"]) == normalize_days(["sat", "sun"])
+
+
+@pytest.mark.parametrize(
+    "given",
+    [None, "sat", ["saturday"], ["sunday"], ["mon", 1], ["mon", None], {"sat"}, 6, ["monday"]],
+)
+def test_rejected_day_lists(given):
+    """A bare string, a full day name and a set are all easy client mistakes."""
+    with pytest.raises(ValidationError, match=re.escape("Invalid days.")):
+        normalize_days(given)
+
+
+def test_surrounding_space_in_a_day_name_is_stripped():
+    assert normalize_days(["  Sat  ", "sun "]) == ["sat", "sun"]
+
+
+def test_an_empty_day_list_is_rejected_rather_than_read_as_every_day():
+    """Omitting the field already spells 'no filter'; [] would never fire."""
+    with pytest.raises(ValidationError, match=re.escape("Invalid days.")):
+        normalize_days([])
+
+
+# -- the any_quiet_session filters --------------------------------------------
+
+def test_the_filters_are_all_optional():
+    request = NotificationRequest.from_payload(rolling_payload())
+    assert (request.days, request.not_before, request.not_after) == (None, None, None)
+
+
+def test_the_filters_are_stored_canonical():
+    request = NotificationRequest.from_payload(
+        rolling_payload(days=["SUN", "sat"], not_before="9:00", not_after="13:00:00")
+    )
+    assert request.days == ["sat", "sun"]
+    assert (request.not_before, request.not_after) == ("09:00", "13:00")
+
+
+@pytest.mark.parametrize("field", ["days", "not_before", "not_after"])
+def test_an_explicit_null_filter_is_the_same_as_omitting_it(field):
+    request = NotificationRequest.from_payload(rolling_payload(**{field: None}))
+    assert getattr(request, field) is None
+
+
+def test_one_bound_may_be_set_without_the_other():
+    request = NotificationRequest.from_payload(rolling_payload(not_before="09:00"))
+    assert (request.not_before, request.not_after) == ("09:00", None)
+
+
+def test_equal_bounds_are_allowed():
+    """An inclusive range of one instant is odd but not wrong."""
+    request = NotificationRequest.from_payload(
+        rolling_payload(not_before="09:00", not_after="09:00")
+    )
+    assert (request.not_before, request.not_after) == ("09:00", "09:00")
+
+
+def test_an_inverted_range_is_rejected_rather_than_wrapping_past_midnight():
+    with pytest.raises(ValidationError, match="not_before must be earlier than not_after"):
+        NotificationRequest.from_payload(
+            rolling_payload(not_before="13:00", not_after="09:00")
+        )
+
+
+@pytest.mark.parametrize("field", ["not_before", "not_after"])
+def test_a_bad_bound_names_itself_so_the_client_knows_which_one(field):
+    with pytest.raises(ValidationError, match=re.escape(f"Invalid {field} format.")):
+        NotificationRequest.from_payload(rolling_payload(**{field: "9am"}))
+
+
+def test_the_time_error_for_the_session_field_itself_is_unchanged():
+    """The bare message is part of the contract and the app surfaces it."""
+    with pytest.raises(ValidationError, match=re.escape("Invalid time format.")):
+        normalize_time("9am")
+
+
+@pytest.mark.parametrize(
+    "notification_type", ["below_threshold", "above_zero", "quiet_session"]
+)
+@pytest.mark.parametrize("field, value", [("days", ["sat"]), ("not_before", "09:00"),
+                                          ("not_after", "13:00")])
+def test_the_filters_are_rejected_on_every_other_type(notification_type, field, value):
+    """Silently ignoring them would let a watch the user created never fire."""
+    payload = {
+        "performance_ak": "TWB.EVN1.PRF1",
+        "date": "2026-08-05",
+        "time": "18:00",
+        "side": "right",
+        "notification_type": notification_type,
+        "thresholds": [5],
+        "minimum_slots": 8,
+        "time_before": "24h",
+        field: value,
+    }
+    with pytest.raises(
+        ValidationError,
+        match=f"{field} is only valid for any_quiet_session notification_type",
+    ):
+        NotificationRequest.from_payload(payload)
+
+
+def test_a_null_filter_on_another_type_is_not_an_error():
+    """Rejection is for a filter that was actually asked for."""
+    payload = {
+        "performance_ak": "TWB.EVN1.PRF1",
+        "date": "2026-08-05",
+        "time": "18:00",
+        "side": "right",
+        "notification_type": "above_zero",
+        "days": None,
+    }
+    assert NotificationRequest.from_payload(payload).days is None
+
+
+def test_a_missing_field_still_beats_a_bad_filter():
+    """models.py pins 'first failure wins, missing beats malformed'."""
+    payload = rolling_payload(days=["saturday"])
+    del payload["title"]
+    with pytest.raises(ValidationError, match="Missing required field: title"):
+        NotificationRequest.from_payload(payload)
+
+
+def test_an_unknown_type_is_reported_before_its_filters_are_judged():
+    payload = {
+        "performance_ak": "TWB.EVN1.PRF1",
+        "date": "2026-08-05",
+        "time": "18:00",
+        "side": "right",
+        "notification_type": "sideways",
+        "days": ["sat"],
+    }
+    with pytest.raises(ValidationError, match="Invalid notification_type"):
+        NotificationRequest.from_payload(payload)
+
+
+def test_the_filters_are_omitted_from_the_response_when_unset():
+    body = stored(notification_type="any_quiet_session").to_api()
+    assert not {"days", "not_before", "not_after"} & set(body)
+
+
+def test_the_filters_are_echoed_when_set():
+    body = stored(days=["sat", "sun"], not_before="09:00", not_after="13:00").to_api()
+    assert body["days"] == ["sat", "sun"]
+    assert (body["not_before"], body["not_after"]) == ("09:00", "13:00")
+
+
+# -- _decode_days -------------------------------------------------------------
+
+@pytest.mark.parametrize("given", [None, ""])
+def test_decode_days_reads_an_absent_filter_as_none(given):
+    assert _decode_days(given) is None
+
+
+@pytest.mark.parametrize("given", ["junk", "5", 5, "null", '{"sat": 1}', '["saturday"]', [7]])
+def test_decode_days_reads_an_unreadable_filter_as_empty_not_absent(given):
+    """The worker skips a scan on []; conflating it with None would widen the watch."""
+    assert _decode_days(given) == []
+
+
+def test_decode_days_round_trips_and_canonicalises():
+    assert _decode_days('["sun", "SAT"]') == ["sat", "sun"]
+    assert _decode_days(["mon"]) == ["mon"]
+
+
+def test_decode_days_keeps_the_recognisable_part_of_a_partly_bad_column():
+    assert _decode_days('["sat", "someday"]') == ["sat"]

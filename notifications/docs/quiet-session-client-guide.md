@@ -12,6 +12,7 @@ fires at or **above** its value, where `thresholds` fires at or **below**.
 | Watches | one session you already picked | any session matching a title + side |
 | Identified by | `performance_ak` + `date` + `time` | `title` |
 | Fires | once, ~`time_before` before that session | once per matching session, forever |
+| Filterable by day/time | no | yes, optionally |
 | Calendar-validated on create | yes (404 / 400) | no |
 | Deleted automatically | yes, after the session starts | **never** |
 
@@ -76,8 +77,9 @@ notification you created still exists.
 }
 ```
 
-Exactly these five fields. **Do not send** `performance_ak`, `date` or `time` —
-they are ignored, and the server stores `""` for all three.
+Those five fields are required, plus up to three optional filters below.
+**Do not send** `performance_ak`, `date` or `time` — they are ignored, and the
+server stores `""` for all three.
 
 Every ~5 minutes the server scans all sessions starting within the next
 `time_before` hours, and pushes for each one whose title and side match and
@@ -98,6 +100,54 @@ upstream outage and for a title with no sessions currently scheduled.
 
 **This type is never deleted server-side.** If the user turns the alert off,
 you must `DELETE` it, or it keeps scanning indefinitely.
+
+### Narrowing it by day and time
+
+A user who can only surf at weekends does not want a push about a quiet Tuesday
+07:00 session — and since this type is never deleted, that noise does not stop
+on its own. Three optional filters cut it down:
+
+```json
+{
+  "notification_type": "any_quiet_session",
+  "title": "Advanced Surf",
+  "side": "right",
+  "minimum_slots": 8,
+  "time_before": "48h",
+  "days": ["sat", "sun"],
+  "not_before": "09:00",
+  "not_after": "13:00"
+}
+```
+
+That watch pushes only for a session starting on a Saturday or Sunday, between
+09:00 and 13:00 inclusive, in the next 48 hours, with 8+ free on the right.
+
+- `days` — a **non-empty** list of `"mon"`, `"tue"`, `"wed"`, `"thu"`, `"fri"`,
+  `"sat"`, `"sun"`. Case-insensitive in; echoed lowercase, deduplicated and in
+  calendar order, so `["SUN","sat"]` comes back as `["sat","sun"]`. Full names
+  like `"saturday"` are **rejected**, as is `[]` — send no `days` key at all for
+  "any day", because an empty list is what a picker with nothing selected
+  produces and a watch that can never fire is not what the user meant.
+- `not_before` / `not_after` — `HH:MM` (the same formats `time` accepts),
+  **inclusive at both ends**: `"not_before": "09:00"` includes a 09:00 session.
+  Either may be sent without the other. `not_before` later than `not_after` is
+  rejected rather than read as wrapping past midnight.
+
+All three are optional and independent, and they only ever narrow: a session has
+to be inside the `time_before` window **and** on an allowed day **and** inside
+the time range. Sending none of them is the behaviour this type has always had,
+so **existing watches are unaffected** and you can adopt the filters whenever
+you like.
+
+Days are the Europe/London calendar day of the session, which is what the user
+sees on the booking page — not UTC, so a 00:30 session in British Summer Time
+counts as the day it reads as, not the one before.
+
+The three fields are **`any_quiet_session`-only** and rejected with a `400` on
+the other types, rather than accepted and ignored. On a type that names one
+session a day filter can only agree with that session's own start or silence the
+alert entirely, and the second one would be silent both ways.
 
 ---
 
@@ -130,6 +180,8 @@ you must `DELETE` it, or it keeps scanning indefinitely.
 an `any_quiet_session`. Don't feed them to a date parser without checking.
 
 `minimum_slots` and `time_before` appear only for these two types;
+`days`, `not_before` and `not_after` only for an `any_quiet_session` that set
+them, so **treat all three as absent-or-present**, not as nullable keys;
 `last_checked_availability` only after the server has read a seat count, and
 never for `any_quiet_session`.
 
@@ -175,6 +227,10 @@ session, all carrying the same `notification_id`.
 | Missing `time_before` | `time_before is required for <type> notification_type` |
 | Bad `time_before` | `Invalid time_before format. Expected a whole number of hours, e.g. '24h'` |
 | Out of range | `time_before must be between 1h and 48h` |
+| Bad `days` (incl. `[]`) | `Invalid days. Expected a non-empty list of 'mon', 'tue', 'wed', 'thu', 'fri', 'sat' or 'sun'` |
+| Bad `not_before` / `not_after` | `Invalid <field> format. Expected HH:MM, HH:MM:SS, or HH:MM:SS.mmm` |
+| Inverted time range | `not_before must be earlier than not_after` |
+| A filter on another type | `<field> is only valid for any_quiet_session notification_type` |
 | Unknown performance (`quiet_session`) | `Performance not found for performanceAK=…` — **404** |
 | Side not sold (`quiet_session`) | `Side '<side>' not found for performance …` |
 

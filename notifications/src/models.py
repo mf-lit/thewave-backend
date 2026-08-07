@@ -20,6 +20,14 @@ QUIET_SESSION = "quiet_session"
 ANY_QUIET_SESSION = "any_quiet_session"
 
 VALID_SIDES: Tuple[str, ...] = ("left", "right", "none")
+
+# Ordered so the index *is* `datetime.weekday()` — Monday is 0. `clock` relies
+# on that to name a session's day with a single lookup.
+VALID_DAYS: Tuple[str, ...] = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
+# The optional filters any_quiet_session accepts and no other type does.
+FILTER_FIELDS: Tuple[str, ...] = ("days", "not_before", "not_after")
+
 VALID_NOTIFICATION_TYPES: Tuple[str, ...] = (
     BELOW_THRESHOLD,
     ABOVE_ZERO,
@@ -46,6 +54,11 @@ ANY_QUIET_REQUIRED_FIELDS: Tuple[str, ...] = (
 
 TIME_FORMAT_ERROR = "Invalid time format. Expected HH:MM, HH:MM:SS, or HH:MM:SS.mmm"
 
+DAYS_FORMAT_ERROR = (
+    "Invalid days. Expected a non-empty list of 'mon', 'tue', 'wed', 'thu', "
+    "'fri', 'sat' or 'sun'"
+)
+
 MAX_TIME_BEFORE_HOURS = 48
 TIME_BEFORE_FORMAT_ERROR = (
     "Invalid time_before format. Expected a whole number of hours, e.g. '24h'"
@@ -60,22 +73,57 @@ class ValidationError(ValueError):
     """A client-visible validation failure. ``str(exc)`` is the API message."""
 
 
-def normalize_time(value: Any) -> str:
-    """Accept HH:MM, HH:MM:SS or HH:MM:SS.mmm; return canonical HH:MM."""
+def normalize_time(value: Any, field: Optional[str] = None) -> str:
+    """Accept HH:MM, HH:MM:SS or HH:MM:SS.mmm; return canonical HH:MM.
+
+    ``field`` names the offending field in the error. Without it the message is
+    the one the API has always returned for ``time``, verbatim; a payload
+    carrying more than one time-valued field passes its name so the client can
+    tell which of them it got wrong.
+    """
+    error = TIME_FORMAT_ERROR if field is None else TIME_FORMAT_ERROR.replace(
+        "Invalid time format", f"Invalid {field} format", 1
+    )
     if not isinstance(value, str):
-        raise ValidationError(TIME_FORMAT_ERROR)
+        raise ValidationError(error)
     try:
         parts = value.split(":")
         if len(parts) < 2:
-            raise ValidationError(TIME_FORMAT_ERROR)
+            raise ValidationError(error)
         hour = int(parts[0])
         minute = int(parts[1].split(".")[0])
     except (ValueError, IndexError):
-        raise ValidationError(TIME_FORMAT_ERROR)
+        raise ValidationError(error)
 
     if not (0 <= hour < 24 and 0 <= minute < 60):
-        raise ValidationError(TIME_FORMAT_ERROR)
+        raise ValidationError(error)
     return f"{hour:02d}:{minute:02d}"
+
+
+def normalize_days(value: Any) -> List[str]:
+    """Accept a list of day names in any case; return them canonical and sorted.
+
+    Sorted into calendar order and deduplicated, so ``["SUN", "sat", "sun"]``
+    and ``["sat", "sun"]`` produce the same stored value and two watches for the
+    same weekends are the same row to read.
+
+    An empty list is rejected rather than read as "every day": omitting the
+    field already spells that, so a list that arrived empty is far more likely a
+    client that built it from an empty selection and would otherwise create a
+    watch that can never fire.
+    """
+    if not isinstance(value, list) or not value:
+        raise ValidationError(DAYS_FORMAT_ERROR)
+
+    wanted = set()
+    for day in value:
+        if not isinstance(day, str):
+            raise ValidationError(DAYS_FORMAT_ERROR)
+        name = day.strip().lower()
+        if name not in VALID_DAYS:
+            raise ValidationError(DAYS_FORMAT_ERROR)
+        wanted.add(name)
+    return [day for day in VALID_DAYS if day in wanted]
 
 
 def normalize_duration(value: Any) -> str:
@@ -131,6 +179,9 @@ class NotificationRequest:
     minimum_slots: Optional[int] = None
     time_before: Optional[str] = None
     title: Optional[str] = None
+    days: Optional[List[str]] = None
+    not_before: Optional[str] = None
+    not_after: Optional[str] = None
 
     @classmethod
     def from_payload(cls, payload: Dict[str, Any]) -> "NotificationRequest":
@@ -177,6 +228,26 @@ class NotificationRequest:
                 "time_before is required for any_quiet_session notification_type"
             )
 
+        # All three optional, and each narrows the window independently: a row
+        # with none of them behaves exactly as this type always has.
+        days = None if payload.get("days") is None else normalize_days(payload["days"])
+        not_before = (
+            None
+            if payload.get("not_before") is None
+            else normalize_time(payload["not_before"], "not_before")
+        )
+        not_after = (
+            None
+            if payload.get("not_after") is None
+            else normalize_time(payload["not_after"], "not_after")
+        )
+        # Canonical HH:MM is zero-padded, so lexicographic order is
+        # chronological. An inverted pair is rejected rather than read as
+        # wrapping past midnight: nothing here starts on one day and is still
+        # starting on the next, so a wrapping window is a client bug.
+        if not_before is not None and not_after is not None and not_before > not_after:
+            raise ValidationError("not_before must be earlier than not_after")
+
         # The three columns that identify one session are NOT NULL and this
         # type has no session; empty strings are the sentinel. `clock` reads
         # them as unparseable, so nothing treats the row as a dated one.
@@ -190,6 +261,9 @@ class NotificationRequest:
             minimum_slots=minimum_slots,
             time_before=normalize_duration(payload["time_before"]),
             title=title.strip(),
+            days=days,
+            not_before=not_before,
+            not_after=not_after,
         )
 
     @classmethod
@@ -216,6 +290,16 @@ class NotificationRequest:
                 "Invalid notification_type. Must be 'below_threshold', "
                 "'above_zero', 'quiet_session', or 'any_quiet_session'"
             )
+
+        # Rejected rather than ignored. Every other type names one session, so a
+        # day or time-of-day filter on it is either a restatement of that
+        # session's own start or a way to stop a watch the user deliberately
+        # created from ever firing — and the second one would be silent.
+        for name in FILTER_FIELDS:
+            if payload.get(name) is not None:
+                raise ValidationError(
+                    f"{name} is only valid for any_quiet_session notification_type"
+                )
 
         thresholds = payload.get("thresholds")
         minimum_slots = None
@@ -291,6 +375,32 @@ def _decode_json_map(raw: Any) -> Dict[str, str]:
     return {str(key): str(value) for key, value in decoded.items()}
 
 
+def _decode_days(raw: Any) -> Optional[List[str]]:
+    """Decode a stored ``days`` column. None when absent, ``[]`` when unreadable.
+
+    The read-side counterpart to `normalize_days`, tolerant in the way
+    `duration_hours` is. Absent and unreadable are kept apart deliberately, and
+    the empty list is free to mean the latter because `normalize_days` refuses
+    to write one: a NULL means the user asked for no day filter, while a column
+    holding something this cannot make sense of means the filter is *lost*.
+    Folding the two together would let one corrupt row silently widen a
+    weekends-only watch to every day of the week, which is the failure the
+    worker skips a scan to avoid.
+    """
+    if raw is None or raw == "":
+        return None
+    decoded = raw
+    if not isinstance(decoded, list):
+        try:
+            decoded = json.loads(raw)
+        except (TypeError, ValueError):
+            return []
+    if not isinstance(decoded, list):
+        return []
+    wanted = {day.strip().lower() for day in decoded if isinstance(day, str)}
+    return [day for day in VALID_DAYS if day in wanted]
+
+
 @dataclass(frozen=True)
 class Notification:
     """A stored notification row."""
@@ -315,6 +425,11 @@ class Notification:
     # session is over, so the map stays bounded on a row that outlives every
     # session it notifies about.
     notified_performances: Dict[str, str] = field(default_factory=dict)
+    # The optional narrowing an any_quiet_session row may carry. None on each
+    # axis means no filter, which is what every row predating them reads as.
+    days: Optional[List[str]] = None
+    not_before: Optional[str] = None
+    not_after: Optional[str] = None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "Notification":
@@ -335,15 +450,19 @@ class Notification:
             minimum_slots=row["minimum_slots"],
             time_before=row["time_before"],
             notified_performances=_decode_json_map(row["notified_performances"]),
+            days=_decode_days(row["days"]),
+            not_before=row["not_before"],
+            not_after=row["not_after"],
         )
 
     def to_api(self) -> Dict[str, Any]:
         """The wire shape clients receive.
 
         ``thresholds`` appears only for below_threshold notifications,
-        ``minimum_slots`` and ``time_before`` only for the quiet types, and
-        ``last_checked_availability`` only once a check has run, matching
-        what the app has always been sent.
+        ``minimum_slots`` and ``time_before`` only for the quiet types,
+        ``days``/``not_before``/``not_after`` only for an any_quiet_session that
+        set them, and ``last_checked_availability`` only once a check has run,
+        matching what the app has always been sent.
 
         ``performance_ak``/``date``/``time`` are always present, empty for an
         any_quiet_session row: they are fields every row has rather than
@@ -368,6 +487,12 @@ class Notification:
             body["minimum_slots"] = self.minimum_slots
         if self.time_before is not None:
             body["time_before"] = self.time_before
+        if self.days:
+            body["days"] = list(self.days)
+        if self.not_before is not None:
+            body["not_before"] = self.not_before
+        if self.not_after is not None:
+            body["not_after"] = self.not_after
         if self.last_checked_availability is not None:
             body["last_checked_availability"] = self.last_checked_availability
         return body

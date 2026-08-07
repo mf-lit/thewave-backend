@@ -12,8 +12,10 @@ from pathlib import Path
 
 import pytest
 
-from src import migrations
+from src import clock, migrations
 from src.db import Database
+from src.models import Notification
+from src.repository import _SELECT
 
 PRODUCTION_SNAPSHOT = Path("/thewave/db_backup/notifications-pre-rewrite.db")
 
@@ -225,3 +227,39 @@ def test_a_database_predating_notified_performances_gains_the_column(tmp_path):
     after = database.connection().execute("SELECT * FROM notifications").fetchall()
     assert rows_preserved(before, after)
     assert after[0]["notified_performances"] is None
+
+
+def test_a_database_predating_the_session_filters_gains_the_columns(tmp_path):
+    database = legacy_database(tmp_path / "legacy.db")
+    before = database.connection().execute("SELECT * FROM notifications").fetchall()
+
+    migrations.apply(database)
+
+    assert {"days", "not_before", "not_after"} <= columns(database, "notifications")
+    after = database.connection().execute("SELECT * FROM notifications").fetchall()
+    assert rows_preserved(before, after)
+    # NULL on every axis, which every existing row reads as "no filter" — the
+    # behaviour any_quiet_session had before the columns existed.
+    assert (after[0]["days"], after[0]["not_before"], after[0]["not_after"]) == (None,) * 3
+
+
+def test_an_existing_rolling_row_keeps_scanning_unfiltered(tmp_path):
+    """The filters are opt-in; a row written before them must not narrow itself."""
+    database = legacy_database(tmp_path / "legacy.db")
+    migrations.apply(database)
+    conn = database.connection()
+    conn.execute(
+        """
+        INSERT INTO notifications (client_id, notification_id, performance_ak, date,
+            time, side, title, notification_type, created_at, minimum_slots, time_before)
+        VALUES ('c1','n2','','','','right','Advanced Surf','any_quiet_session',
+                '2026-07-05T20:06:33', 8, '24h')
+        """
+    )
+    conn.commit()
+
+    row = Notification.from_row(
+        conn.execute(_SELECT + "WHERE notification_id = 'n2'").fetchone()
+    )
+    assert (row.days, row.not_before, row.not_after) == (None, None, None)
+    assert clock.matches_schedule("2026-08-01", "11:00", row.days, row.not_before, row.not_after)

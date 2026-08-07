@@ -29,7 +29,8 @@ _SELECT = """
 SELECT client_id, notification_id, performance_ak, date, time, side, title,
        notification_type, thresholds, notified_thresholds,
        last_checked_availability, next_check_at, created_at,
-       minimum_slots, time_before, notified_performances
+       minimum_slots, time_before, notified_performances,
+       days, not_before, not_after
 FROM notifications
 """
 
@@ -52,8 +53,9 @@ class NotificationRepository:
                     client_id, notification_id, performance_ak, date, time, side,
                     title, notification_type, thresholds, notified_thresholds,
                     last_checked_availability, next_check_at, created_at,
-                    minimum_slots, time_before, notified_performances
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)
+                    minimum_slots, time_before, notified_performances,
+                    days, not_before, not_after
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     client_id,
@@ -71,6 +73,9 @@ class NotificationRepository:
                     request.minimum_slots,
                     request.time_before,
                     json.dumps({}) if is_rolling else None,
+                    json.dumps(request.days) if request.days else None,
+                    request.not_before,
+                    request.not_after,
                 ),
             )
 
@@ -90,6 +95,9 @@ class NotificationRepository:
             minimum_slots=request.minimum_slots,
             time_before=request.time_before,
             notified_performances={},
+            days=list(request.days) if request.days else None,
+            not_before=request.not_before,
+            not_after=request.not_after,
         )
 
     @staticmethod

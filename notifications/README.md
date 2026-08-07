@@ -163,8 +163,40 @@ scheduled is legitimate — the cost is that a typo silently never fires.
 This is the one type with no session to expire against, so it is **never
 deleted automatically**. It scans until the client deletes it.
 
+Three optional filters narrow which sessions it will push for. They apply to
+this type alone — every other type already names one session, so a filter on it
+would either restate that session's own start or silently stop a watch the user
+deliberately created, and both are refused with a 400:
+
+```json
+{
+  "notification_type": "any_quiet_session",
+  "title": "Advanced Surf",
+  "side": "right",
+  "minimum_slots": 8,
+  "time_before": "48h",
+  "days": ["sat", "sun"],
+  "not_before": "09:00",
+  "not_after": "13:00"
+}
+```
+
+`days` is `"mon"`…`"sun"`, case-insensitive and stored deduplicated in calendar
+order; `not_before` and `not_after` are `HH:MM` and **inclusive** at both ends.
+Each is independent and each is optional, so a row carrying none of them — which
+is every row written before they existed — matches exactly what it always did.
+An empty `days` list is rejected rather than read as "every day", since omitting
+the field already spells that and a list that arrived empty is a client that
+built it from an empty selection.
+
+They narrow, never widen: a session must be inside the `time_before` window
+*and* on an allowed day *and* inside the time range. Weekdays come off the
+Europe/London calendar date, so a 00:30 BST Sunday session is a Sunday and not
+the Saturday it is in UTC.
+
 Responses carry `thresholds` only for `below_threshold`, `minimum_slots` and
-`time_before` only for the two quiet types, and `last_checked_availability`
+`time_before` only for the two quiet types, `days`/`not_before`/`not_after` only
+for an `any_quiet_session` that set them, and `last_checked_availability`
 only once the worker has read it. `performance_ak`, `date` and `time` are
 always present, empty for an `any_quiet_session`:
 
@@ -263,6 +295,12 @@ docker exec thewave-notifications-worker uv run python -m src.admin clear-notifi
 docker exec thewave-notifications-worker uv run python -m src.admin prune-tokenless [--dry-run]
 ```
 
+`list` has a `WHEN` column carrying any day and time-of-day filter — the first
+place to look when a rolling watch is not firing, since a filtered one skips
+sessions silently. `BAD DAYS` there means the `days` column could not be read
+and the worker is refusing to scan that row at all, which from the outside is
+indistinguishable from nothing having been quiet.
+
 `clear-thresholds` re-arms every `below_threshold` notification and
 `clear-notified` every `any_quiet_session` (both useful for testing delivery).
 `prune-tokenless` drops notifications whose client has no token, and client rows
@@ -293,6 +331,11 @@ CREATE TABLE notifications (
     time_before TEXT,                 -- e.g. '24h', quiet types only
     notified_performances TEXT,       -- JSON object of performance_ak -> session
                                       -- date, any_quiet_session only
+    days TEXT,                        -- JSON array of 'mon'..'sun', calendar
+                                      -- order; any_quiet_session only, NULL
+                                      -- means no day filter
+    not_before TEXT,                  -- HH:MM Europe/London, inclusive; as above
+    not_after TEXT,                   -- HH:MM Europe/London, inclusive; as above
     PRIMARY KEY (client_id, notification_id)
 );
 

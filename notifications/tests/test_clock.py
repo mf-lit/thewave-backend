@@ -180,3 +180,83 @@ def test_rows_woken_minutes_apart_converge_on_one_slot():
     """This is what lets every rolling row share a single calendar fetch."""
     slots = {clock.next_slot(5, now=utc(2026, 7, 31, 10, m)) for m in (6, 7, 8, 9)}
     assert slots == {"2026-07-31 10:10:00"}
+
+
+# -- day and time-of-day filters ----------------------------------------------
+
+@pytest.mark.parametrize(
+    "date, expected",
+    [
+        ("2026-07-27", "mon"),
+        ("2026-07-31", "fri"),
+        ("2026-08-01", "sat"),
+        ("2026-08-02", "sun"),
+    ],
+)
+def test_day_name_reads_the_local_calendar_day(date, expected):
+    assert clock.day_name(date) == expected
+
+
+@pytest.mark.parametrize("date", ["", None, "2026-08-32", "Saturday"])
+def test_day_name_is_none_for_anything_it_cannot_read(date):
+    assert clock.day_name(date) is None
+
+
+def test_no_filters_matches_everything():
+    """A row with none of them set behaves exactly as the type always has."""
+    assert clock.matches_schedule("2026-08-01", "10:00") is True
+
+
+@pytest.mark.parametrize("expected, days", [(True, ["sat", "sun"]), (False, ["mon", "tue"])])
+def test_the_day_filter_admits_only_its_own_days(expected, days):
+    assert clock.matches_schedule("2026-08-01", "10:00", days=days) is expected
+
+
+def test_a_bst_session_just_after_midnight_keeps_its_local_day():
+    """00:30 BST on Sunday is 23:30 UTC on Saturday — the whole point of `day_name`."""
+    assert clock.matches_schedule("2026-08-02", "00:30", days=["sun"]) is True
+    assert clock.matches_schedule("2026-08-02", "00:30", days=["sat"]) is False
+
+
+@pytest.mark.parametrize("date", ["2026-03-29", "2026-10-25"])
+def test_a_session_on_a_clock_change_keeps_its_local_day(date):
+    """Spring forward and autumn back both land on a Sunday."""
+    assert clock.matches_schedule(date, "10:00", days=["sun"]) is True
+
+
+@pytest.mark.parametrize(
+    "time, expected",
+    [("08:59", False), ("09:00", True), ("11:00", True), ("13:00", True), ("13:01", False)],
+)
+def test_both_time_bounds_are_inclusive(time, expected):
+    matches = clock.matches_schedule(
+        "2026-08-01", time, not_before="09:00", not_after="13:00"
+    )
+    assert matches is expected
+
+
+def test_either_bound_may_stand_alone():
+    assert clock.matches_schedule("2026-08-01", "20:00", not_before="09:00") is True
+    assert clock.matches_schedule("2026-08-01", "20:00", not_after="13:00") is False
+
+
+def test_the_filters_and_together():
+    """The right time on the wrong day is still a miss."""
+    assert clock.matches_schedule(
+        "2026-08-01", "10:00", days=["sat"], not_before="09:00", not_after="13:00"
+    ) is True
+    assert clock.matches_schedule(
+        "2026-07-31", "10:00", days=["sat"], not_before="09:00", not_after="13:00"
+    ) is False
+
+
+def test_an_hour_before_noon_is_not_read_as_a_bigger_number():
+    """String comparison is only correct because both sides are zero-padded."""
+    assert clock.matches_schedule("2026-08-01", "09:00", not_before="10:00") is False
+
+
+@pytest.mark.parametrize("date, time", [("", ""), ("2026-08-01", "8pm"), ("nope", "10:00")])
+def test_matches_schedule_is_false_for_anything_it_cannot_read(date, time):
+    """The empty date and time on an any_quiet_session row can never look like a match."""
+    assert clock.matches_schedule(date, time, days=["sat"]) is False
+    assert clock.matches_schedule(date, time) is False

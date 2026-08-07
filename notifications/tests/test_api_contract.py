@@ -604,3 +604,85 @@ def test_a_rolling_watch_round_trips_through_the_list_endpoint(client, client_id
     assert len(listed) == 1
     assert listed[0]["notification_type"] == "any_quiet_session"
     assert "notified_performances" not in listed[0]
+
+
+def test_a_rolling_watch_echoes_its_filters_canonically(client, client_id, auth):
+    response = client.post(
+        f"/clients/{client_id}/notifications",
+        json=rolling_body(days=["SUN", "sat"], not_before="9:00", not_after="13:00:00"),
+        headers=auth,
+    )
+
+    assert response.status_code == 201
+    body = response.get_json()
+    assert body["days"] == ["sat", "sun"]
+    assert body["not_before"] == "09:00" and body["not_after"] == "13:00"
+
+
+def test_the_filters_survive_the_list_endpoint(client, client_id, auth):
+    client.post(
+        f"/clients/{client_id}/notifications",
+        json=rolling_body(days=["sat"], not_before="09:00"),
+        headers=auth,
+    )
+
+    listed = client.get(f"/clients/{client_id}/notifications", headers=auth).get_json()
+
+    assert listed[0]["days"] == ["sat"]
+    assert listed[0]["not_before"] == "09:00"
+    assert "not_after" not in listed[0]
+
+
+def test_the_filters_are_absent_when_unset(client, client_id, auth):
+    """The response shape for an existing unfiltered watch is unchanged."""
+    body = client.post(
+        f"/clients/{client_id}/notifications", json=rolling_body(), headers=auth
+    ).get_json()
+
+    assert not {"days", "not_before", "not_after"} & set(body)
+
+
+@pytest.mark.parametrize(
+    "overrides, expected",
+    [
+        ({"days": ["saturday"]}, "Invalid days."),
+        ({"days": []}, "Invalid days."),
+        ({"days": "sat"}, "Invalid days."),
+        ({"not_before": "9am"}, "Invalid not_before format."),
+        ({"not_after": "25:00"}, "Invalid not_after format."),
+        (
+            {"not_before": "13:00", "not_after": "09:00"},
+            "not_before must be earlier than not_after",
+        ),
+    ],
+)
+def test_rejected_filters_report_their_own_field(client, client_id, auth, overrides, expected):
+    response = client.post(
+        f"/clients/{client_id}/notifications", json=rolling_body(**overrides), headers=auth
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"].startswith(expected)
+
+
+@pytest.mark.parametrize("field", ["days", "not_before", "not_after"])
+def test_the_filters_are_refused_on_a_type_that_names_one_session(
+    client, client_id, auth, field
+):
+    response = client.post(
+        f"/clients/{client_id}/notifications",
+        json={
+            "performance_ak": PERFORMANCE_AK,
+            "date": DATE,
+            "time": "18:00",
+            "side": "right",
+            "notification_type": "above_zero",
+            field: ["sat"] if field == "days" else "09:00",
+        },
+        headers=auth,
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == (
+        f"{field} is only valid for any_quiet_session notification_type"
+    )

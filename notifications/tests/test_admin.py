@@ -160,3 +160,51 @@ def test_clear_notified_re_arms_a_rolling_watch(services, capsys):
     assert "1 notification(s)" in capsys.readouterr().out
     reloaded = services.notifications.get("rolling", notification.notification_id)
     assert reloaded.notified_performances == {}
+
+
+@pytest.mark.parametrize(
+    "overrides, expected",
+    [
+        ({}, "-"),
+        ({"days": ["sun", "sat"]}, "sat,sun"),
+        ({"not_before": "09:00", "not_after": "13:00"}, "09:00-13:00"),
+        ({"not_before": "09:00"}, "from 09:00"),
+        ({"not_after": "13:00"}, "to 13:00"),
+        ({"days": ["sat"], "not_before": "09:00", "not_after": "13:00"},
+         "sat 09:00-13:00"),
+    ],
+)
+def test_list_shows_why_a_rolling_watch_skips_sessions(
+    services, capsys, overrides, expected
+):
+    """A filtered watch skips silently, so the table is where you go to see it."""
+    add_rolling(services, **overrides)
+
+    run(services, ["list"])
+
+    line = [l for l in capsys.readouterr().out.splitlines() if "any_quiet_session" in l][0]
+    assert expected in line
+
+
+def test_list_calls_out_a_filter_it_cannot_read(services, capsys):
+    """The worker refuses to scan such a row, which otherwise looks like a quiet day."""
+    notification = add_rolling(services, days=["sat"])
+    services.notifications.db.connection().execute(
+        "UPDATE notifications SET days = 'someday' WHERE notification_id = ?",
+        (notification.notification_id,),
+    )
+    services.notifications.db.connection().commit()
+
+    run(services, ["list"])
+
+    assert "BAD DAYS" in capsys.readouterr().out
+
+
+def test_the_when_column_is_blank_for_a_type_that_cannot_be_filtered(services, capsys):
+    add(services, "c1")  # above_zero
+
+    run(services, ["list"])
+    output = capsys.readouterr().out
+
+    assert "WHEN" in output
+    assert "BAD DAYS" not in output

@@ -30,12 +30,41 @@ def _fires_at(notification: Notification) -> str:
     return "-"
 
 
+def _when(notification: Notification) -> str:
+    """The day and time-of-day filter on a rolling watch, or ``-`` for none.
+
+    A filtered any_quiet_session skips sessions silently, by design, so this
+    column is the only place an operator can see why a watch that otherwise
+    looks right is not firing.
+
+    An unreadable ``days`` column is called out rather than rendered as no
+    filter: it means the worker is refusing to scan that row at all, which
+    looks identical to "nothing was quiet" from the outside.
+    """
+    if notification.days == []:
+        return "BAD DAYS"
+
+    parts = []
+    if notification.days:
+        parts.append(",".join(notification.days))
+    before, after = notification.not_before, notification.not_after
+    if before and after:
+        parts.append(f"{before}-{after}")
+    elif before:
+        parts.append(f"from {before}")
+    elif after:
+        parts.append(f"to {after}")
+    return " ".join(parts) or "-"
+
+
 def _print_table(notifications: List[Notification], tokens: set) -> None:
     if not notifications:
         print("No notifications.")
         return
 
-    headers = ("DATE", "TIME", "SIDE", "TYPE", "AVAIL", "FIRES AT", "TITLE", "CLIENT", "PUSH")
+    headers = (
+        "DATE", "TIME", "SIDE", "TYPE", "AVAIL", "FIRES AT", "WHEN", "TITLE", "CLIENT", "PUSH"
+    )
     rows = [
         (
             # An any_quiet_session row watches a window rather than a session,
@@ -46,6 +75,7 @@ def _print_table(notifications: List[Notification], tokens: set) -> None:
             n.notification_type,
             "-" if n.last_checked_availability is None else str(n.last_checked_availability),
             _fires_at(n),
+            _when(n),
             n.title,
             n.client_id,
             "yes" if n.client_id in tokens else "NO TOKEN",
