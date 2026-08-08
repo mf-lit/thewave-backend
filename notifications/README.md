@@ -243,9 +243,9 @@ string needs an app release. `tests/test_push.py` pins them.
 
 ```
 title  "Advanced Surf: 5th Jan at 18:00"
-body   "Availability dropped to 3 on the right"      (below_threshold)
-       "A session has become available"              (above_zero)
-       "Quiet session: 12 slots remaining on the right"  (both quiet types)
+body   "Availability dropped to 3 on the right"                   (below_threshold)
+       "A session has become available"                           (above_zero)
+       "Possible quiet session: 12 slots remaining on the right"  (both quiet types)
 data   performance_ak, date, time, side, session_title, availability,
        notification_type, notification_id, threshold, minimum_slots
 ```

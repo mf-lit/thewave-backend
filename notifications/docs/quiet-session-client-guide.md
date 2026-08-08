@@ -191,7 +191,7 @@ never for `any_quiet_session`.
 
 ```
 title  "Advanced Surf: 5th Jan at 18:00"
-body   "Quiet session: 12 slots remaining on the right"     ← both types
+body   "Possible quiet session: 12 slots remaining on the right"     ← both types
 data   performance_ak, date, time, side, session_title, availability,
        notification_type, notification_id, threshold, minimum_slots
 ```

@@ -86,7 +86,7 @@ def test_quiet_session_display_strings():
     """Without its own branch this would inherit the below_threshold wording."""
     title, body = display_strings(notification(notification_type=QUIET_SESSION), 12)
     assert title == "Advanced Surf: 5th Jan at 18:00"
-    assert body == "Quiet session: 12 slots remaining on the right"
+    assert body == "Possible quiet session: 12 slots remaining on the right"
 
 
 def test_quiet_session_sends_its_minimum_in_its_own_key():
@@ -199,7 +199,7 @@ def test_notifier_uses_a_fake_sender_only(sender):
 def test_any_quiet_session_shares_the_quiet_session_body():
     """One sentence for both: the title line already names the session."""
     title, body = display_strings(notification(notification_type=ANY_QUIET_SESSION), 12)
-    assert body == "Quiet session: 12 slots remaining on the right"
+    assert body == "Possible quiet session: 12 slots remaining on the right"
 
 
 def test_a_rolling_push_describes_the_matched_session():

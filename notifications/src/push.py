@@ -78,7 +78,7 @@ def display_strings(notification: Notification, availability: int) -> Tuple[str,
         # The same sentence for both: an any_quiet_session push is handed a copy
         # carrying the matched session's date and time, so the title line above
         # already says which session this is.
-        body = f"Quiet session: {availability} slots remaining on the {notification.side}"
+        body = f"Possible quiet session: {availability} slots remaining on the {notification.side}"
     else:
         body = f"Availability dropped to {availability} on the {notification.side}"
     return title, body

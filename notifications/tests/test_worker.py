@@ -308,7 +308,7 @@ def test_a_quiet_session_pushes_once_its_check_comes_due(
     worker.run_once()
 
     assert len(sender.sent) == 1
-    assert sender.sent[0].body == "Quiet session: 20 slots remaining on the right"
+    assert sender.sent[0].body == "Possible quiet session: 20 slots remaining on the right"
     assert sender.sent[0].data["minimum_slots"] == "12"
     assert sender.sent[0].data["threshold"] == ""
 
@@ -476,7 +476,7 @@ def test_a_rolling_watch_pushes_for_a_quiet_session_in_its_window(
     assert len(sender.sent) == 1
     assert sender.sent[0].data["performance_ak"] == "P1"
     assert sender.sent[0].data["availability"] == "9"
-    assert sender.sent[0].body == "Quiet session: 9 slots remaining on the right"
+    assert sender.sent[0].body == "Possible quiet session: 9 slots remaining on the right"
 
 
 def test_the_push_describes_the_matched_session_not_the_row(
