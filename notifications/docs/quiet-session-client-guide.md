@@ -192,12 +192,19 @@ never for `any_quiet_session`.
 ```
 title  "Advanced Surf: 5th Jan at 18:00"
 body   "Possible quiet session: 12 slots remaining on the right"     ← both types
+       "Possible quiet session: 12 slots remaining"                  ← side "none"
 data   performance_ak, date, time, side, session_title, availability,
        notification_type, notification_id, threshold, minimum_slots
 ```
 
 All `data` values are strings. `threshold` is `""` for both quiet types;
 `minimum_slots` carries the configured value.
+
+`on the <side>` is dropped when `side` is `none` — a whole-lagoon session has no
+side to name, and the clause used to read "on the none". The `data` map's `side`
+key is unchanged and still carries `none`, so parse from there, not the body.
+**If the app's own `NotificationFormatter` builds this sentence for in-app
+display, apply the same rule there** or a banner and its in-app twin will differ.
 
 **The one thing that will bite you:** for `any_quiet_session`, the push's
 `performance_ak`, `date`, `time` and `session_title` describe the **matched

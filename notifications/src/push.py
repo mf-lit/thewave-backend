@@ -57,6 +57,22 @@ def _ordinal(day: int) -> str:
     return {1: f"{day}st", 2: f"{day}nd", 3: f"{day}rd"}.get(day % 10, f"{day}th")
 
 
+def side_phrase(side: str) -> str:
+    """`` on the right``, or nothing at all when the session has no side.
+
+    ``none`` is a real stored value, not a missing one: whole-lagoon sessions
+    (Beginner Lesson, Play In The Bay, Pilates) sell only that, and course
+    products list it alongside a left/right pair. It reached the body strings
+    verbatim and read as "on the none".
+
+    The clause is dropped rather than translated. "across the lagoon" would be
+    right for the whole-lagoon sessions and wrong for the course products, which
+    do have sides — and a seat count with no side named already says the only
+    thing the phrase was there to say.
+    """
+    return f" on the {side}" if side and side != "none" else ""
+
+
 def format_date_short(date_str: str) -> str:
     """``2026-01-05`` -> ``5th Jan``; unparseable input passes through."""
     try:
@@ -78,9 +94,12 @@ def display_strings(notification: Notification, availability: int) -> Tuple[str,
         # The same sentence for both: an any_quiet_session push is handed a copy
         # carrying the matched session's date and time, so the title line above
         # already says which session this is.
-        body = f"Possible quiet session: {availability} slots remaining on the {notification.side}"
+        body = (
+            f"Possible quiet session: {availability} slots remaining"
+            f"{side_phrase(notification.side)}"
+        )
     else:
-        body = f"Availability dropped to {availability} on the {notification.side}"
+        body = f"Availability dropped to {availability}{side_phrase(notification.side)}"
     return title, body
 
 

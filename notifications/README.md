@@ -250,6 +250,11 @@ data   performance_ak, date, time, side, session_title, availability,
        notification_type, notification_id, threshold, minimum_slots
 ```
 
+`on the <side>` is omitted entirely when `side` is `none` — "Possible quiet
+session: 12 slots remaining" — since a whole-lagoon session has no side to name
+and the clause used to render as "on the none". The `side` key in the `data`
+map is unaffected and still carries `none` verbatim.
+
 `threshold` is the count at or below which `below_threshold` fires;
 `minimum_slots` is the count at or above which the quiet types do. Opposite
 senses, so they are separate keys — each is `""` for the types it does not

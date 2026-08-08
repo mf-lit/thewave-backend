@@ -26,6 +26,7 @@ from src.push import (
     display_strings,
     fingerprint,
     format_date_short,
+    side_phrase,
 )
 from tests.conftest import VALID_TOKEN
 
@@ -212,3 +213,46 @@ def test_a_rolling_push_describes_the_matched_session():
     title, _ = display_strings(matched, 12)
     assert title == "Advanced Surf: 5th Jan at 18:00"
     assert data_payload(matched, 12, None)["performance_ak"] == "P9"
+
+
+# -- sessions with no side ----------------------------------------------------
+
+@pytest.mark.parametrize("side, expected", [("left", " on the left"), ("right", " on the right")])
+def test_side_phrase_names_a_real_side(side, expected):
+    assert side_phrase(side) == expected
+
+
+@pytest.mark.parametrize("side", ["none", "", None])
+def test_side_phrase_is_empty_when_there_is_no_side(side):
+    """'none' is a stored value, not a missing one, and it is not a place."""
+    assert side_phrase(side) == ""
+
+
+@pytest.mark.parametrize(
+    "notification_type, expected",
+    [
+        (QUIET_SESSION, "Possible quiet session: 12 slots remaining"),
+        (ANY_QUIET_SESSION, "Possible quiet session: 12 slots remaining"),
+        (BELOW_THRESHOLD, "Availability dropped to 12"),
+    ],
+)
+def test_a_whole_lagoon_session_does_not_say_on_the_none(notification_type, expected):
+    """Beginner Lesson, Play In The Bay and Pilates only ever sell side 'none'."""
+    _, body = display_strings(
+        notification(notification_type=notification_type, side="none"), 12
+    )
+    assert body == expected
+    assert "none" not in body
+
+
+def test_a_sided_session_still_names_its_side():
+    """The clause is dropped only where it had nothing to say."""
+    _, quiet = display_strings(notification(notification_type=QUIET_SESSION, side="left"), 12)
+    _, dropped = display_strings(notification(notification_type=BELOW_THRESHOLD, side="left"), 3)
+    assert quiet == "Possible quiet session: 12 slots remaining on the left"
+    assert dropped == "Availability dropped to 3 on the left"
+
+
+def test_the_side_is_still_sent_verbatim_in_the_data_map():
+    """Display copy changed; the key the Flutter app parses did not."""
+    assert data_payload(notification(side="none"), 12, None)["side"] == "none"
