@@ -85,6 +85,26 @@ services:
       - PROXY_HEALTH_FILE=/app/shared/proxy_health
     restart: unless-stopped
 
+  webapp:
+    build:
+      # The Flutter app lives in a separate repo. The image is a thin nginx that
+      # only copies build/web, so deploy/build.sh must have run there first —
+      # see that repo's /deploy-web skill, which owns the order.
+      context: /home/marc/waveform
+      dockerfile: deploy/Dockerfile
+    container_name: thewave-webapp
+    ports:
+      # Reached publicly as waveform.vq5.net via the tunnel over the docker
+      # network; this binding is only for local checks, so keep it off the LAN
+      # like dashboard/sqlite-web.
+      - "${TAILSCALE_IP}:5004:80"
+    environment:
+      # nginx injects this as x-api-key on its two /api/* proxy_pass blocks, so
+      # the browser bundle carries no key. Its own entry in upstream-api's
+      # config.yaml, revocable without touching installed mobile apps.
+      - UPSTREAM_API_KEY=${WEBAPP_UPSTREAM_API_KEY}
+    restart: unless-stopped
+
   log-alerter:
     build: ./log-alerts
     restart: unless-stopped
@@ -93,7 +113,7 @@ services:
       - WIREPUSHER_TYPE=log-alert       # optional, customize in the app under "Types"
       - LOG_PATTERN=error|exception|fatal|panic
       - COOLDOWN=60
-      - CONTAINERS=thewave-notifications-api thewave-notifications-worker thewave-upstream-api          # leave unset to watch all
+      - CONTAINERS=thewave-notifications-api thewave-notifications-worker thewave-upstream-api thewave-webapp          # leave unset to watch all
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
