@@ -14,6 +14,7 @@ from src.core.wave_calendar import (
     load_test_data,
     transform_dates_in_response,
     add_side_to_availability,
+    fix_buggy_performance_end_times,
     load_upstream_api_url
 )
 import src.core.wave_calendar as wave_calendar
@@ -302,6 +303,7 @@ def calendar_endpoint():
             test_data = load_test_data()
             # Add side field before returning (test data is always fresh, not cached)
             response_data = transform_dates_in_response(test_data, date_from, number_of_days_str)
+            response_data = fix_buggy_performance_end_times(response_data)
             response_data = add_side_to_availability(response_data)
             # Add water temperature to performances based on timing
             response_data = add_temperature_to_performances(response_data)

@@ -120,7 +120,9 @@ def get_calendar(date_from: str, number_of_days: str) -> dict:
                 continue
 
             response.raise_for_status()
-            return response.json()
+            # Correct the upstream 2h59m timeEnd bug at the boundary, so every
+            # consumer (cache, history, enrichment) sees the real session end.
+            return fix_buggy_performance_end_times(response.json())
 
         except (requests.exceptions.ProxyError, requests.exceptions.ConnectionError) as e:
             if attempt < max_retries:
@@ -282,5 +284,119 @@ def add_side_to_availability(data: dict) -> dict:
                     _add_side_to_item(item)
             else:
                 _add_side_to_item(availability)
+
+    return data
+
+
+# Upstream calendar bug: some performances come back with a timeEnd exactly
+# 2h59m after time. Those sessions are really 59m long, like every other one.
+_BUGGY_DURATION = timedelta(hours=2, minutes=59)
+_CORRECTED_DURATION = timedelta(minutes=59)
+
+
+def _parse_time_of_day(time_str: str) -> timedelta | None:
+    """
+    Parse an upstream "HH:MM:SS[.mmm]" time into an offset from midnight.
+
+    Args:
+        time_str: Time string from a performance
+
+    Returns:
+        timedelta | None: Offset from midnight, or None if unparseable
+    """
+    if not isinstance(time_str, str):
+        return None
+
+    try:
+        parsed = datetime.strptime(time_str.split(".")[0], "%H:%M:%S")
+    except ValueError:
+        return None
+
+    return timedelta(hours=parsed.hour, minutes=parsed.minute, seconds=parsed.second)
+
+
+def _format_time_of_day(offset: timedelta, template: str) -> str:
+    """
+    Format an offset from midnight, keeping the template's fractional part.
+
+    Args:
+        offset: Offset from midnight
+        template: Original time string, used to preserve the ".mmm" suffix
+
+    Returns:
+        str: Time string in the same shape as the template
+    """
+    total_seconds = int(offset.total_seconds())
+    formatted = f"{total_seconds // 3600:02d}:{total_seconds // 60 % 60:02d}:{total_seconds % 60:02d}"
+
+    if "." in template:
+        formatted = f"{formatted}.{template.split('.', 1)[1]}"
+
+    return formatted
+
+
+def _fix_performance_time_end(performance: dict) -> None:
+    """
+    Override a single performance's buggy timeEnd in place.
+
+    Args:
+        performance: Performance dictionary with 'time' and 'timeEnd' fields
+    """
+    if not isinstance(performance, dict):
+        return
+
+    end_str = performance.get("timeEnd")
+    start = _parse_time_of_day(performance.get("time"))
+    end = _parse_time_of_day(end_str)
+
+    if start is None or end is None:
+        return
+
+    duration = end - start
+    if duration < timedelta(0):
+        # A late session whose end wrapped past midnight
+        duration += timedelta(days=1)
+
+    if duration != _BUGGY_DURATION:
+        return
+
+    corrected = _format_time_of_day((start + _CORRECTED_DURATION) % timedelta(days=1), end_str)
+    logger.info(
+        f"Overriding buggy timeEnd for performance {performance.get('performanceAK', 'unknown')} "
+        f"on {performance.get('date', 'unknown')}: {end_str} -> {corrected}"
+    )
+    performance["timeEnd"] = corrected
+
+
+def fix_buggy_performance_end_times(data: dict) -> dict:
+    """
+    Override timeEnd on performances hit by the upstream 2h59m bug.
+
+    Only a timeEnd exactly 2h59m after time is treated as buggy, so genuinely
+    longer sessions are left untouched.
+
+    Args:
+        data: Response data dictionary
+
+    Returns:
+        dict: Response data with buggy timeEnd values corrected
+    """
+    if not isinstance(data, dict) or "days" not in data:
+        return data
+
+    days = data.get("days", [])
+    if not isinstance(days, list):
+        return data
+
+    for day in days:
+        if not isinstance(day, dict):
+            continue
+
+        performances = day.get("performances", [])
+        if not isinstance(performances, list):
+            continue
+
+        for performance in performances:
+            _fix_performance_time_end(performance)
 
     return data

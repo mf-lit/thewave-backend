@@ -6,6 +6,8 @@ from datetime import datetime, timedelta
 import copy
 import yaml
 
+from src.core.wave_calendar import fix_buggy_performance_end_times
+
 logger = logging.getLogger(__name__)
 
 # Global variable to cache the history directory path
@@ -287,4 +289,5 @@ def build_multi_day_response(date_from: str, number_of_days: int) -> dict:
         }
         logger.warning(f"Partial historical response: {len(missing_days)} day(s) missing out of {number_of_days} requested")
     
-    return response
+    # History files saved before the timeEnd fix can still hold the buggy value
+    return fix_buggy_performance_end_times(response)
