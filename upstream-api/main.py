@@ -27,6 +27,7 @@ from src.core.weather_forecast import add_weather_to_performances
 from src.core.auth import load_api_keys, require_api_key
 from src.core.client_tracker import init_client_tracking, track_client
 from src.core.version_gate import load_min_client_versions, apply_upgrade_gate
+from src.core.response_fields import strip_unused_fields
 from src.core.weather import (
     get_cached_weather,
     fetch_and_cache_weather
@@ -246,6 +247,10 @@ def _format_response_with_expires(data: dict, expires: float) -> dict:
     """
     Format response data with expires field.
 
+    Also the last thing every calendar path passes through, so it is where the
+    unread upstream `fields` keys are dropped - one hook rather than three, and
+    one a future response path cannot forget.
+
     Args:
         data: Response data (dict or other)
         expires: Expiration timestamp
@@ -254,7 +259,7 @@ def _format_response_with_expires(data: dict, expires: float) -> dict:
         dict: Response with expires field added
     """
     if isinstance(data, dict):
-        return {**data, "expires": int(expires)}
+        return {**strip_unused_fields(data), "expires": int(expires)}
     return {"data": data, "expires": int(expires)}
 
 

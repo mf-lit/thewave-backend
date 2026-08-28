@@ -83,6 +83,10 @@ services:
       # list-form values through verbatim, so "false" arrives with its quotes
       # and reads as a non-empty string that is not the literal false.
       - ALLOW_FORCE_REFRESH=false
+      # Drop the upstream ticketing platform's unread `fields` keys (team
+      # logos, seat maps, button configs) from calendar responses - a third of
+      # the payload. Set false to serve them again without a rebuild.
+      - STRIP_UNUSED_FIELDS=true
       # Cap the calendar window a single request may ask for. Seven is the
       # widest view any client has: the schedule shows at most seven columns,
       # and the notifications worker chunks its batches to match.
