@@ -52,8 +52,11 @@ _day_cache: dict[str, dict] = {}
 # Cache TTL in seconds (default: 600, configurable via CACHE_TTL_SECONDS env var)
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "600"))
 
+# Upper bound on the calendar window a single request may ask for.
+MAX_NUMBER_OF_DAYS = int(os.getenv("MAX_NUMBER_OF_DAYS", "7"))
+
 # Allow force-refresh via query parameter (default: true, set ALLOW_FORCE_REFRESH=false to disable)
-ALLOW_FORCE_REFRESH = os.getenv("ALLOW_FORCE_REFRESH", "true").lower() not in ("false", "0", "no")
+ALLOW_FORCE_REFRESH = os.getenv("ALLOW_FORCE_REFRESH", "true").strip().strip('"\'').lower() not in ("false", "0", "no")
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes and origins
@@ -293,7 +296,20 @@ def calendar_endpoint():
     
     # Get optional parameters
     number_of_days_str = request.args.get("numberOfDays", "1")
-    number_of_days = int(number_of_days_str)
+    try:
+        number_of_days = int(number_of_days_str)
+    except ValueError:
+        return jsonify({"error": "numberOfDays must be an integer"}), 400
+
+    # Bound the window. gunicorn runs one worker with two threads, so a couple
+    # of very large requests are enough to stall the API for every client -
+    # including the mobile apps. Nothing legitimate asks for more than a month:
+    # the widest client view is seven days.
+    if not 1 <= number_of_days <= MAX_NUMBER_OF_DAYS:
+        return jsonify({
+            "error": f"numberOfDays must be between 1 and {MAX_NUMBER_OF_DAYS}"
+        }), 400
+    number_of_days_str = str(number_of_days)
     refresh = ALLOW_FORCE_REFRESH and request.args.get("refresh", "").lower() in ("true", "1", "yes")
     
     # Test mode: use dummy data from response.json for all dates (past, present, future)

@@ -79,8 +79,14 @@ services:
       - PYTHONDONTWRITEBYTECODE=1
       - FLASK_ENV=production
 
-      # Prevent clients forcing refresh
-      - ALLOW_FORCE_REFRESH="false"
+      # Prevent clients forcing refresh. Unquoted deliberately: compose passes
+      # list-form values through verbatim, so "false" arrives with its quotes
+      # and reads as a non-empty string that is not the literal false.
+      - ALLOW_FORCE_REFRESH=false
+      # Cap the calendar window a single request may ask for. Seven is the
+      # widest view any client has: the schedule shows at most seven columns,
+      # and the notifications worker chunks its batches to match.
+      - MAX_NUMBER_OF_DAYS=7
       - OVPN_FLAG_FILE=/app/shared/ovpn_flag
       - PROXY_HEALTH_FILE=/app/shared/proxy_health
     restart: unless-stopped

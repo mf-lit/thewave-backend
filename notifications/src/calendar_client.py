@@ -21,6 +21,9 @@ from .models import ValidationError, normalize_time, normalize_title
 logger = logging.getLogger(__name__)
 
 REQUEST_TIMEOUT = 30
+
+# The widest window upstream-api will serve in one call (its MAX_NUMBER_OF_DAYS).
+MAX_CALENDAR_DAYS = 7
 DATE_FORMAT = "%Y-%m-%d"
 
 
@@ -116,14 +119,20 @@ def performance_title(performance: Dict) -> str:
 
 
 def group_consecutive(dates: Sequence[str]) -> List[List[str]]:
-    """Split sorted dates into runs of consecutive calendar days."""
+    """Split sorted dates into runs of consecutive calendar days.
+
+    Runs are capped at ``MAX_CALENDAR_DAYS``: upstream-api rejects a wider
+    window outright, so a long run has to go out as several calls rather than
+    one that fails. Rolling watches never reach the cap (48h is three days at
+    most), but per-session rows spread across a fortnight would.
+    """
     if not dates:
         return []
     groups = [[dates[0]]]
     for date in dates[1:]:
         previous = datetime.strptime(groups[-1][-1], DATE_FORMAT)
         current = datetime.strptime(date, DATE_FORMAT)
-        if (current - previous).days == 1:
+        if (current - previous).days == 1 and len(groups[-1]) < MAX_CALENDAR_DAYS:
             groups[-1].append(date)
         else:
             groups.append([date])

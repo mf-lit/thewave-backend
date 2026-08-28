@@ -12,6 +12,7 @@ from src.calendar_client import (
     CalendarError,
     availability_for_side,
     group_consecutive,
+    MAX_CALENDAR_DAYS,
     matching_sessions,
     performance_title,
 )
@@ -107,6 +108,29 @@ def test_consecutive_dates_cost_one_request():
 
     assert len(session.calls) == 1
     assert session.calls[0]["params"] == {"dateFrom": "2026-08-05", "numberOfDays": 3}
+
+
+def test_long_runs_are_split_at_the_upstream_window_cap():
+    """upstream-api rejects a window wider than MAX_CALENDAR_DAYS outright, so a
+    long run has to go out as several calls rather than one that 400s."""
+    dates = [f"2026-08-{day:02d}" for day in range(5, 22)]  # 17 consecutive days
+
+    groups = group_consecutive(dates)
+
+    assert [len(group) for group in groups] == [7, 7, 3]
+    # Nothing is dropped or reordered by the split.
+    assert [date for group in groups for date in group] == dates
+
+
+def test_a_long_run_asks_for_no_more_than_the_cap():
+    session = FakeSession()
+    dates = [f"2026-08-{day:02d}" for day in range(5, 18)]  # 13 consecutive days
+
+    client(session).fetch_dates(dates)
+
+    windows = [call["params"]["numberOfDays"] for call in session.calls]
+    assert windows == [7, 6]
+    assert max(windows) <= MAX_CALENDAR_DAYS
 
 
 def test_gaps_split_into_separate_requests():
