@@ -1,8 +1,14 @@
-# Scope the API token to this zone only — it needs no account-wide or DNS
-# access. Two permissions are required, not one:
+# Three permissions on the API token, and one resource scope that is easy to
+# miss:
 #
-#   Zone > WAF         > Edit   the custom rules and the rate-limit rule
-#   Zone > Cache Rules > Edit   the cache rules
+#   Zone    > WAF              > Edit   the custom rules and the rate-limit rule
+#   Zone    > Cache Rules      > Edit   the cache rules
+#   Account > Cloudflare Tunnel> Edit   the tunnel ingress config (tunnel.tf)
+#
+# The last one also needs the token's Account Resources to include the account.
+# That is a separate section of the token editor from Zone Resources, and a
+# token that leaves it empty reports zero accounts and 403s on every tunnel
+# endpoint no matter which permissions it holds. Nothing here needs DNS.
 #
 # WAF, not Firewall Services, despite the name — this cost an afternoon once.
 # The rulesets API authorises per phase, after it has parsed the request body:

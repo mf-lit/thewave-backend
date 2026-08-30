@@ -2,6 +2,8 @@
 
 cloudflare_api_token = "paste the scoped API token here"
 cloudflare_zone_id   = "zone ID for vq5.net, from the Cloudflare dashboard overview page"
+cloudflare_account_id = "account ID owning the tunnel; Zero Trust > Settings"
+cloudflare_tunnel_id  = "ID of the cloudflared tunnel; Zero Trust > Networks > Tunnels"
 
 # --- Optional overrides (defaults shown) ---
 # Confirm hostnames in Zero Trust > Networks > Tunnels > (tunnel) > Public Hostname.

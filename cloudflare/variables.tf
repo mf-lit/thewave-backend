@@ -9,6 +9,16 @@ variable "cloudflare_zone_id" {
   type        = string
 }
 
+variable "cloudflare_account_id" {
+  description = "Account ID owning the tunnel (Zero Trust > Settings, or the \"a\" field of CLOUDFLARE_TUNNEL_TOKEN in the compose .env)."
+  type        = string
+}
+
+variable "cloudflare_tunnel_id" {
+  description = "ID of the cloudflared tunnel whose ingress rules this manages (the \"t\" field of the same token). The tunnel object itself is deliberately not a Terraform resource; see tunnel.tf."
+  type        = string
+}
+
 variable "notifications_hostnames" {
   description = "Public hostnames the tunnel routes to notifications-api."
   type        = list(string)
