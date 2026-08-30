@@ -1,0 +1,13 @@
+# Terraform state (contains the API token) — never commit
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl.bak
+
+# Variable files with the real API token
+terraform.tfvars
+*.auto.tfvars
+
+crash.log
+crash.*.log
+*.tfplan

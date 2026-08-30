@@ -1,0 +1,12 @@
+# Copy to terraform.tfvars and fill in. terraform.tfvars is gitignored.
+
+cloudflare_api_token = "paste the scoped API token here"
+cloudflare_zone_id   = "zone ID for vq5.net, from the Cloudflare dashboard overview page"
+
+# --- Optional overrides (defaults shown) ---
+# Confirm hostnames in Zero Trust > Networks > Tunnels > (tunnel) > Public Hostname.
+# upstream_api_hostnames  = ["wave-api.vq5.net", "wave-api-oci.vq5.net"]
+# notifications_hostnames = ["wave-notifications.vq5.net", "wave-notifications-oci.vq5.net"]
+# webapp_hostname         = "waveform.vq5.net"
+# rule_action             = "block" # or "managed_challenge"; "log" needs Enterprise
+# api_rate_limit_per_10s  = 7
