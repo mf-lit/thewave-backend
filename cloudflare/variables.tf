@@ -20,15 +20,15 @@ variable "cloudflare_tunnel_id" {
 }
 
 variable "notifications_hostnames" {
-  description = "Public hostnames the tunnel routes to notifications-api."
+  description = "Public hostnames the tunnel routes to notifications-api. A list because there was briefly a second origin; kept as one so another can be added without reshaping the rule expression."
   type        = list(string)
-  default     = ["wave-notifications.vq5.net", "wave-notifications-oci.vq5.net"]
+  default     = ["wave-notifications.vq5.net"]
 }
 
 variable "upstream_api_hostnames" {
-  description = "Public hostnames the tunnel routes to upstream-api."
+  description = "Public hostnames the tunnel routes to upstream-api. A list for the same reason as notifications_hostnames above."
   type        = list(string)
-  default     = ["wave-api.vq5.net", "wave-api-oci.vq5.net"]
+  default     = ["wave-api.vq5.net"]
 }
 
 variable "webapp_hostname" {
