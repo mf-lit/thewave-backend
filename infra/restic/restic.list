@@ -1,2 +1,3 @@
 /thewave/docker_vols
 /thewave/db_backup
+/thewave/ml/data/hourly.csv

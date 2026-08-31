@@ -14,7 +14,7 @@ venv/
 .env
 
 # Generated pipeline artifacts — regenerable on-demand (see README quickstart).
-# Kept for on-demand forecasting: models/best/, data/hourly.csv, archive_*.parquet.
+# Kept for on-demand forecasting: models/best/, archive_*.parquet.
 # NB: .gitignore has no inline comments — keep each comment on its own line.
 # forecast outputs (incl. latest.csv)
 /forecast/
@@ -22,6 +22,8 @@ venv/
 # training feature intermediates
 /data/interim/
 /data/processed/
+# hourly-updated; backed up via restic instead (infra/restic/restic.list)
+/data/hourly.csv
 # 1h-TTL weather cache, re-fetched live
 /data/external/openmeteo/forecast_*.parquet
 # runtime anchor; rebuilt via --update-state
