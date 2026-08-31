@@ -30,10 +30,21 @@ def _exclude_cloud() -> bool:
     return request.args.get("exclude_cloud", "0") in ("1", "true", "True")
 
 
+def _client_os():
+    """Platform to filter on, or None for all. Bound as a param, never inlined."""
+    return request.args.get("client_os") or None
+
+
+@app.route("/api/client-os")
+def api_client_os():
+    """The platform values available to the OS filter drop-down."""
+    return jsonify(queries.client_os_values())
+
+
 @app.route("/api/summary")
 def api_summary():
     """Headline counts for the top badges."""
-    return jsonify(queries.summary_stats(exclude_cloud=_exclude_cloud()))
+    return jsonify(queries.summary_stats(exclude_cloud=_exclude_cloud(), client_os=_client_os()))
 
 
 @app.route("/api/clients/new")
@@ -45,6 +56,7 @@ def api_clients_new():
         request.args.get("from"),
         request.args.get("to"),
         exclude_cloud=_exclude_cloud(),
+        client_os=_client_os(),
     )
     return jsonify(data)
 
@@ -57,6 +69,7 @@ def api_clients_active():
         request.args.get("from"),
         request.args.get("to"),
         exclude_cloud=_exclude_cloud(),
+        client_os=_client_os(),
     )
     return jsonify(data)
 
@@ -74,6 +87,7 @@ def api_clients():
         limit=request.args.get("limit", default=40, type=int),
         offset=request.args.get("offset", default=0, type=int),
         exclude_cloud=_exclude_cloud(),
+        client_os=_client_os(),
     )
     return jsonify(data)
 

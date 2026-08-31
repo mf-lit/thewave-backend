@@ -5,6 +5,7 @@ A small Flask + Chart.js web dashboard over The Wave's SQLite data.
 It shows:
 - **New clients per day** (by `first_seen`) and **active clients per day** (by `last_seen`*) as charts
 - **Configurable detail tables** for both (date range, day/week/month granularity, click-to-sort, column toggles)
+- An **OS filter** (Android / iOS / web) applying to the badges, charts, and clients table
 - A **notifications list** with each client's alias
 
 \* The active-clients chart is approximate: `last_seen` only records each client's *most recent*

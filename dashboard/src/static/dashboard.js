@@ -9,6 +9,7 @@ function controlParams() {
   if ($("#to").value) p.set("to", $("#to").value);
   p.set("granularity", $("#granularity").value);
   if ($("#exclude-cloud").checked) p.set("exclude_cloud", "1");
+  if ($("#client-os").value) p.set("client_os", $("#client-os").value);
   return p;
 }
 
@@ -34,11 +35,27 @@ async function getJSON(path, params) {
   return res.json();
 }
 
+// ---- OS filter --------------------------------------------------------------
+// Options come from the data; these just spell the known values nicely.
+const OS_LABELS = { android: "Android", ios: "iOS", web: "Web" };
+
+async function populateOSFilter() {
+  const values = await getJSON("/api/client-os");
+  const sel = $("#client-os");
+  values.forEach((v) => {
+    const opt = document.createElement("option");
+    opt.value = v;
+    opt.textContent = OS_LABELS[v] || v;
+    sel.append(opt);
+  });
+}
+
 // ---- summary badges ---------------------------------------------------------
 // Fixed-window counts; independent of the date picker, but honour the cloud toggle.
 async function renderSummary() {
   const params = new URLSearchParams();
   if ($("#exclude-cloud").checked) params.set("exclude_cloud", "1");
+  if ($("#client-os").value) params.set("client_os", $("#client-os").value);
   const s = await getJSON("/api/summary", params);
   $("#stat-active").textContent = s.active_clients;
   $("#stat-new-week").textContent = s.new_this_week;
@@ -328,14 +345,17 @@ document.addEventListener("DOMContentLoaded", () => {
   wirePager();
   $("#apply").addEventListener("click", refreshAll);
   $("#exclude-cloud").addEventListener("change", refreshAll); // toggle applies immediately
+  $("#client-os").addEventListener("change", refreshAll);     // as does the OS filter
   $("#reset").addEventListener("click", () => {
     applyDefaultDateRange();
     $("#granularity").value = "day";
     $("#limit").value = "40";
     $("#exclude-cloud").checked = true;
+    $("#client-os").value = "";
     refreshAll();
   });
   applyDefaultDateRange();
+  populateOSFilter();
   refreshAll();
   renderNotifications();
 });

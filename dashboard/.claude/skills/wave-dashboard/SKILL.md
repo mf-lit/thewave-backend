@@ -116,6 +116,20 @@ To extend: add PTR suffixes to `_GOOGLE_PTR_SUFFIXES` (e.g. to also flag AWS, ad
 CIDRs to the range lists. Clients with a NULL IP are never matched (kept). **Containerization note:**
 this needs outbound DNS from the container.
 
+## Filtering by client OS
+
+The **OS** drop-down (`#client-os`) restricts the badges, both charts, and the clients table to one
+platform. Options are served by `/api/client-os` (`queries.client_os_values()` — `SELECT DISTINCT
+client_os`) rather than hard-coded, so a newly reported platform appears on its own; `OS_LABELS` in
+`dashboard.js` only spells the known values ("ios" → "iOS") and falls back to the raw value. Like the
+cloud toggle, changing it refreshes immediately. The value is always a bound `?` param.
+
+One wrinkle: `hist.daily_active` stores no OS, so filtering the *active* chart and the snapshot-backed
+badges (`all_week` / `all_yesterday`) joins history back to `clients` for the client's **current** OS
+(`_hist_os_join`). Clients no longer in `clients` therefore drop out of OS-filtered results — so the
+per-OS counts can sum to slightly less than the unfiltered total on those two paths. That is correct
+(their OS is unknowable), not a bug. `first_seen`-based and `hour`-granularity paths are unaffected.
+
 ## Recipe: add a column to a client table
 
 1. In `queries.py` add the column to the `SELECT` in `client_rows`, and to `_CLIENT_SORT_COLUMNS`

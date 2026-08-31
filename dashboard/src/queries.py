@@ -40,7 +40,7 @@ def _period_expr(column: str, granularity: str) -> str:
     return template.format(col=column)
 
 
-def summary_stats(exclude_cloud=False):
+def summary_stats(exclude_cloud=False, client_os=None):
     """Headline counts for the top-of-page badges (UTC dates, like the charts).
 
     - new_this_week: clients first seen in the last 7 days (today + 6 prior)
@@ -50,10 +50,13 @@ def summary_stats(exclude_cloud=False):
       (days_count > 1); ALWAYS excludes Google/Apple, regardless of the toggle
 
     ``exclude_cloud`` drops known Google/Apple IPs from the first four badges so
-    they match the Hide Google/Apple toggle.
+    they match the Hide Google/Apple toggle. ``client_os`` restricts every badge
+    (including active_clients) to a single platform.
     """
     no_cloud = " AND NOT (is_cloud_ip(last_ip) OR is_cloud_ip(first_ip))"
     cloud = no_cloud if exclude_cloud else ""
+    os_clause = " AND client_os = ?" if client_os else ""
+    os_params = (client_os,) if client_os else ()
     with db.upstream() as conn:
         _prewarm_cloud(conn)  # active_clients always classifies IPs
         d_today, d_yesterday, d_weekstart = conn.execute(
@@ -62,7 +65,8 @@ def summary_stats(exclude_cloud=False):
 
         def count(col, day_expr):
             return conn.execute(
-                f"SELECT COUNT(*) FROM clients WHERE date({col}) {day_expr}{cloud}"
+                f"SELECT COUNT(*) FROM clients WHERE date({col}) {day_expr}{cloud}{os_clause}",
+                os_params,
             ).fetchone()[0]
         stats = {
             "new_this_week": count("first_seen", ">= date('now','-6 days')"),
@@ -71,29 +75,32 @@ def summary_stats(exclude_cloud=False):
             "all_today": count("last_seen", "= date('now')"),
             "active_clients": conn.execute(
                 "SELECT COUNT(*) FROM clients "
-                f"WHERE date(last_seen) >= date('now','-30 days') AND days_count > 1{no_cloud}"
+                f"WHERE date(last_seen) >= date('now','-30 days') AND days_count > 1"
+                f"{no_cloud}{os_clause}",
+                os_params,
             ).fetchone()[0],
         }
 
     # "All clients" over past periods needs the snapshot merge (last_seen alone
     # under-counts completed days); honours the exclude_cloud toggle like all_today.
-    stats["all_yesterday"] = active_clients_total(d_yesterday, d_yesterday, exclude_cloud)
-    stats["all_week"] = active_clients_total(d_weekstart, d_today, exclude_cloud)
+    stats["all_yesterday"] = active_clients_total(d_yesterday, d_yesterday, exclude_cloud, client_os)
+    stats["all_week"] = active_clients_total(d_weekstart, d_today, exclude_cloud, client_os)
     return stats
 
 
-def clients_by_period(timestamp_column: str, granularity: str, date_from=None, date_to=None, exclude_cloud=False):
+def clients_by_period(timestamp_column: str, granularity: str, date_from=None, date_to=None, exclude_cloud=False, client_os=None):
     """Count clients grouped by period of ``timestamp_column``.
 
     ``timestamp_column`` is "first_seen" (new clients) or "last_seen" (active).
-    ``exclude_cloud`` drops known Google/Apple IPs.
+    ``exclude_cloud`` drops known Google/Apple IPs; ``client_os`` restricts to
+    one platform.
     Returns ``[{"period": str, "count": int}, ...]`` ordered by period.
     """
     if timestamp_column not in ("first_seen", "last_seen"):
         raise ValueError(f"invalid timestamp column: {timestamp_column}")
 
     period = _period_expr(timestamp_column, granularity)
-    where, params = _date_range_where(timestamp_column, date_from, date_to, exclude_cloud)
+    where, params = _date_range_where(timestamp_column, date_from, date_to, exclude_cloud, client_os)
     sql = (
         f"SELECT {period} AS period, COUNT(*) AS count "
         f"FROM clients {where} "
@@ -106,7 +113,7 @@ def clients_by_period(timestamp_column: str, granularity: str, date_from=None, d
     return [{"period": r["period"], "count": r["count"]} for r in rows]
 
 
-def active_clients_by_period(granularity, date_from=None, date_to=None, exclude_cloud=False):
+def active_clients_by_period(granularity, date_from=None, date_to=None, exclude_cloud=False, client_os=None):
     """Active clients per period, fixing the last_seen "only most-recent-day" flaw.
 
     Uses authoritative end-of-day snapshots (``hist.daily_active``) for COMPLETED
@@ -116,28 +123,34 @@ def active_clients_by_period(granularity, date_from=None, date_to=None, exclude_
     exists yet, or for hour granularity (snapshots are daily).
     """
     if granularity == "hour" or not db.active_store_exists():
-        return clients_by_period("last_seen", granularity, date_from, date_to, exclude_cloud)
+        return clients_by_period("last_seen", granularity, date_from, date_to, exclude_cloud, client_os)
 
     period = _period_expr("d", granularity)
-    hist_cloud = " AND is_cloud = 0" if exclude_cloud else ""
+    hist_cloud = " AND h.is_cloud = 0" if exclude_cloud else ""
     live_cloud = " AND NOT (is_cloud_ip(last_ip) OR is_cloud_ip(first_ip))" if exclude_cloud else ""
 
     # Completed, snapshotted days come from history; today + any un-snapshotted
     # day comes from live (so it degrades to current behaviour for old history).
-    hist_where, hist_params = ["date < date('now')"], []
+    hist_where, hist_params = ["h.date < date('now')"], []
     live_where = ["(date(last_seen) = date('now') "
                   "OR date(last_seen) NOT IN (SELECT date FROM hist.snapshot_runs))"]
     live_params = []
     if date_from:
-        hist_where.append("date >= ?"); hist_params.append(date_from)
+        hist_where.append("h.date >= ?"); hist_params.append(date_from)
         live_where.append("date(last_seen) >= ?"); live_params.append(date_from)
     if date_to:
-        hist_where.append("date <= ?"); hist_params.append(date_to)
+        hist_where.append("h.date <= ?"); hist_params.append(date_to)
         live_where.append("date(last_seen) <= ?"); live_params.append(date_to)
+    # Snapshots store no OS, so filtering history means joining back to the
+    # client's *current* OS (a client absent from `clients` drops out).
+    hist_join = _hist_os_join(client_os)
+    if client_os:
+        hist_where.append("c.client_os = ?"); hist_params.append(client_os)
+        live_where.append("client_os = ?"); live_params.append(client_os)
 
     sql = (
         f"SELECT {period} AS period, COUNT(DISTINCT client_id) AS count FROM ("
-        f"  SELECT client_id, date AS d FROM hist.daily_active "
+        f"  SELECT h.client_id, h.date AS d FROM hist.daily_active h{hist_join} "
         f"  WHERE {' AND '.join(hist_where)}{hist_cloud} "
         f"  UNION "
         f"  SELECT uuid AS client_id, date(last_seen) AS d FROM clients "
@@ -151,50 +164,58 @@ def active_clients_by_period(granularity, date_from=None, date_to=None, exclude_
     return [{"period": r["period"], "count": r["count"]} for r in rows]
 
 
-def active_clients_total(date_from, date_to, exclude_cloud=False):
+def active_clients_total(date_from, date_to, exclude_cloud=False, client_os=None):
     """Distinct active clients over [date_from, date_to] (inclusive UTC dates).
 
     Uses end-of-day snapshots for completed days + live for today / un-snapshotted
     days, counting DISTINCT clients across the whole range (not a sum of days).
     Falls back to pure live when no snapshot store exists.
     """
+    os_clause = " AND client_os = ?" if client_os else ""
+    os_params = [client_os] if client_os else []
+
     if not db.active_store_exists():
         cloud = " AND NOT (is_cloud_ip(last_ip) OR is_cloud_ip(first_ip))" if exclude_cloud else ""
         sql = ("SELECT COUNT(DISTINCT uuid) FROM clients "
-               f"WHERE date(last_seen) >= ? AND date(last_seen) <= ?{cloud}")
+               f"WHERE date(last_seen) >= ? AND date(last_seen) <= ?{cloud}{os_clause}")
         with db.upstream() as conn:
             if exclude_cloud:
                 _prewarm_cloud(conn)
-            return conn.execute(sql, (date_from, date_to)).fetchone()[0]
+            return conn.execute(sql, [date_from, date_to] + os_params).fetchone()[0]
 
-    hist_cloud = " AND is_cloud = 0" if exclude_cloud else ""
+    hist_cloud = " AND h.is_cloud = 0" if exclude_cloud else ""
     live_cloud = " AND NOT (is_cloud_ip(last_ip) OR is_cloud_ip(first_ip))" if exclude_cloud else ""
+    # See active_clients_by_period: history carries no OS, so join to `clients`.
+    hist_join = _hist_os_join(client_os)
+    hist_os = " AND c.client_os = ?" if client_os else ""
     sql = (
         "SELECT COUNT(DISTINCT client_id) FROM ("
-        "  SELECT client_id FROM hist.daily_active "
-        f"  WHERE date < date('now') AND date >= ? AND date <= ?{hist_cloud} "
+        f"  SELECT h.client_id FROM hist.daily_active h{hist_join} "
+        f"  WHERE h.date < date('now') AND h.date >= ? AND h.date <= ?{hist_cloud}{hist_os} "
         "  UNION "
         "  SELECT uuid AS client_id FROM clients "
         "  WHERE date(last_seen) >= ? AND date(last_seen) <= ? "
         "    AND (date(last_seen) = date('now') "
         "         OR date(last_seen) NOT IN (SELECT date FROM hist.snapshot_runs))"
-        f"{live_cloud}"
+        f"{live_cloud}{os_clause}"
         ")"
     )
+    params = [date_from, date_to] + os_params + [date_from, date_to] + os_params
     with db.upstream(attach_active=True) as conn:
         if exclude_cloud:
             _prewarm_cloud(conn)
-        return conn.execute(sql, (date_from, date_to, date_from, date_to)).fetchone()[0]
+        return conn.execute(sql, params).fetchone()[0]
 
 
-def client_rows(timestamp_column: str, sort="last_seen", direction="desc", date_from=None, date_to=None, limit=40, offset=0, exclude_cloud=False):
+def client_rows(timestamp_column: str, sort="last_seen", direction="desc", date_from=None, date_to=None, limit=40, offset=0, exclude_cloud=False, client_os=None):
     """A page of client detail rows, filtered by ``timestamp_column`` date range.
 
     ``sort`` is validated against an allow-list; ``direction`` is asc/desc.
     ``limit`` is the page size (falsy/non-positive ⇒ all rows on one page) and
     ``offset`` is the starting row. ``exclude_cloud`` drops known Google/Apple
-    IPs. Returns ``{"total": int, "rows": [...]}`` where ``total`` is the
-    unpaginated count for the same filter.
+    IPs; ``client_os`` restricts to one platform. Returns
+    ``{"total": int, "rows": [...]}`` where ``total`` is the unpaginated count
+    for the same filter.
     """
     if timestamp_column not in ("first_seen", "last_seen"):
         raise ValueError(f"invalid timestamp column: {timestamp_column}")
@@ -202,7 +223,7 @@ def client_rows(timestamp_column: str, sort="last_seen", direction="desc", date_
         sort = timestamp_column
     direction = "ASC" if str(direction).lower() == "asc" else "DESC"
 
-    where, params = _date_range_where(timestamp_column, date_from, date_to, exclude_cloud)
+    where, params = _date_range_where(timestamp_column, date_from, date_to, exclude_cloud, client_os)
 
     with db.upstream() as conn:
         if exclude_cloud:
@@ -222,6 +243,20 @@ def client_rows(timestamp_column: str, sort="last_seen", direction="desc", date_
         rows = conn.execute(sql, page_params).fetchall()
 
     return {"total": total, "rows": [dict(r) for r in rows]}
+
+
+def client_os_values():
+    """Distinct client_os values present in the data, for the OS filter.
+
+    Read from the data rather than hard-coded so a newly reported platform shows
+    up in the drop-down on its own.
+    """
+    with db.upstream() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT client_os FROM clients "
+            "WHERE client_os IS NOT NULL AND client_os != '' ORDER BY client_os"
+        ).fetchall()
+    return [r[0] for r in rows]
 
 
 def notifications_with_alias():
@@ -253,6 +288,11 @@ def notifications_with_alias():
 
 # --- helpers -----------------------------------------------------------------
 
+def _hist_os_join(client_os):
+    """JOIN clause attaching each snapshot row to its client, for OS filtering."""
+    return " JOIN clients c ON c.uuid = h.client_id" if client_os else ""
+
+
 def _prewarm_cloud(conn):
     """Resolve all distinct client IPs concurrently so is_cloud_ip hits cache."""
     ips = [r[0] for r in conn.execute(
@@ -261,13 +301,14 @@ def _prewarm_cloud(conn):
     cloud_ips.prewarm(ips)
 
 
-def _date_range_where(column: str, date_from, date_to, exclude_cloud=False):
+def _date_range_where(column: str, date_from, date_to, exclude_cloud=False, client_os=None):
     """Build a WHERE clause restricting ``column`` to [date_from, date_to].
 
     Bounds are inclusive dates (YYYY-MM-DD); the upper bound is extended to the
     end of the day so timestamps on ``date_to`` are included. When
     ``exclude_cloud`` is True, rows whose first/last IP is a known Google/Apple
-    address are dropped (via the ``is_cloud_ip`` SQLite function).
+    address are dropped (via the ``is_cloud_ip`` SQLite function). ``client_os``
+    restricts to a single platform (bound param, so any value is safe).
     """
     clauses, params = [], []
     if date_from:
@@ -278,6 +319,9 @@ def _date_range_where(column: str, date_from, date_to, exclude_cloud=False):
         params.append(f"{date_to}T23:59:59.999999+00:00")
     if exclude_cloud:
         clauses.append("NOT (is_cloud_ip(last_ip) OR is_cloud_ip(first_ip))")
+    if client_os:
+        clauses.append("client_os = ?")
+        params.append(client_os)
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     return where, params
 
