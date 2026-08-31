@@ -31,8 +31,8 @@ def _exclude_cloud() -> bool:
 
 
 def _client_os():
-    """Platform to filter on, or None for all. Bound as a param, never inlined."""
-    return request.args.get("client_os") or None
+    """Platforms to filter on, or [] for all. Bound as params, never inlined."""
+    return [v for v in request.args.getlist("client_os") if v]
 
 
 @app.route("/api/client-os")

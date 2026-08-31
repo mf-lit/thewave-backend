@@ -49,9 +49,10 @@
     </select>
   </label>
   <label>OS
-    <select id="client-os">
-      <option value="">All</option>
-    </select>
+    <div class="ms-dropdown" id="client-os">
+      <button type="button" class="ms-toggle" id="client-os-toggle">All</button>
+      <div class="ms-panel" id="client-os-panel" hidden></div>
+    </div>
   </label>
   <label class="check"><input type="checkbox" id="exclude-cloud" checked> Hide Google/Apple</label>
   <button id="apply">Apply</button>

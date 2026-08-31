@@ -118,11 +118,16 @@ this needs outbound DNS from the container.
 
 ## Filtering by client OS
 
-The **OS** drop-down (`#client-os`) restricts the badges, both charts, and the clients table to one
-platform. Options are served by `/api/client-os` (`queries.client_os_values()` — `SELECT DISTINCT
-client_os`) rather than hard-coded, so a newly reported platform appears on its own; `OS_LABELS` in
-`dashboard.js` only spells the known values ("ios" → "iOS") and falls back to the raw value. Like the
-cloud toggle, changing it refreshes immediately. The value is always a bound `?` param.
+The **OS** drop-down (`#client-os`, a checkbox panel behind a toggle button — not a native
+`<select>`) restricts the badges, both charts, and the clients table to one or more platforms; no
+checkbox checked means all platforms. Options are served by `/api/client-os`
+(`queries.client_os_values()` — `SELECT DISTINCT client_os`) rather than hard-coded, so a newly
+reported platform appears on its own; `OS_LABELS` in `dashboard.js` only spells the known values
+("ios" → "iOS") and falls back to the raw value. Like the cloud toggle, changing it refreshes
+immediately. The frontend sends one `client_os` query param per checked value
+(`URLSearchParams.append`); `main._client_os()` reads them with `request.args.getlist`, and
+`queries._os_predicate` turns the list into an `IN (?, ...)` clause — always bound params, never
+inlined.
 
 One wrinkle: `hist.daily_active` stores no OS, so filtering the *active* chart and the snapshot-backed
 badges (`all_week` / `all_yesterday`) joins history back to `clients` for the client's **current** OS

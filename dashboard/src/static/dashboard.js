@@ -9,7 +9,7 @@ function controlParams() {
   if ($("#to").value) p.set("to", $("#to").value);
   p.set("granularity", $("#granularity").value);
   if ($("#exclude-cloud").checked) p.set("exclude_cloud", "1");
-  if ($("#client-os").value) p.set("client_os", $("#client-os").value);
+  selectedOS().forEach((v) => p.append("client_os", v));
   return p;
 }
 
@@ -41,13 +41,37 @@ const OS_LABELS = { android: "Android", ios: "iOS", web: "Web" };
 
 async function populateOSFilter() {
   const values = await getJSON("/api/client-os");
-  const sel = $("#client-os");
+  const panel = $("#client-os-panel");
   values.forEach((v) => {
-    const opt = document.createElement("option");
-    opt.value = v;
-    opt.textContent = OS_LABELS[v] || v;
-    sel.append(opt);
+    const label = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.value = v;
+    cb.addEventListener("change", () => {
+      updateOSToggleLabel();
+      refreshAll();
+    });
+    label.append(cb, document.createTextNode(" " + (OS_LABELS[v] || v)));
+    panel.append(label);
   });
+}
+
+// Checked OS values, or [] for "All".
+function selectedOS() {
+  return Array.from($("#client-os-panel").querySelectorAll("input:checked")).map((cb) => cb.value);
+}
+
+function updateOSToggleLabel() {
+  const sel = selectedOS();
+  const btn = $("#client-os-toggle");
+  if (sel.length === 0) btn.textContent = "All";
+  else if (sel.length === 1) btn.textContent = OS_LABELS[sel[0]] || sel[0];
+  else btn.textContent = `${sel.length} selected`;
+}
+
+function resetOSFilter() {
+  $("#client-os-panel").querySelectorAll("input:checked").forEach((cb) => (cb.checked = false));
+  updateOSToggleLabel();
 }
 
 // ---- summary badges ---------------------------------------------------------
@@ -55,7 +79,7 @@ async function populateOSFilter() {
 async function renderSummary() {
   const params = new URLSearchParams();
   if ($("#exclude-cloud").checked) params.set("exclude_cloud", "1");
-  if ($("#client-os").value) params.set("client_os", $("#client-os").value);
+  selectedOS().forEach((v) => params.append("client_os", v));
   const s = await getJSON("/api/summary", params);
   $("#stat-active").textContent = s.active_clients;
   $("#stat-new-week").textContent = s.new_this_week;
@@ -345,13 +369,19 @@ document.addEventListener("DOMContentLoaded", () => {
   wirePager();
   $("#apply").addEventListener("click", refreshAll);
   $("#exclude-cloud").addEventListener("change", refreshAll); // toggle applies immediately
-  $("#client-os").addEventListener("change", refreshAll);     // as does the OS filter
+  $("#client-os-toggle").addEventListener("click", (e) => {
+    e.stopPropagation();
+    $("#client-os-panel").hidden = !$("#client-os-panel").hidden;
+  });
+  document.addEventListener("click", (e) => {
+    if (!$("#client-os").contains(e.target)) $("#client-os-panel").hidden = true;
+  });
   $("#reset").addEventListener("click", () => {
     applyDefaultDateRange();
     $("#granularity").value = "day";
     $("#limit").value = "40";
     $("#exclude-cloud").checked = true;
-    $("#client-os").value = "";
+    resetOSFilter();
     refreshAll();
   });
   applyDefaultDateRange();

@@ -51,12 +51,12 @@ def summary_stats(exclude_cloud=False, client_os=None):
 
     ``exclude_cloud`` drops known Google/Apple IPs from the first four badges so
     they match the Hide Google/Apple toggle. ``client_os`` restricts every badge
-    (including active_clients) to a single platform.
+    (including active_clients) to one or more platforms.
     """
     no_cloud = " AND NOT (is_cloud_ip(last_ip) OR is_cloud_ip(first_ip))"
     cloud = no_cloud if exclude_cloud else ""
-    os_clause = " AND client_os = ?" if client_os else ""
-    os_params = (client_os,) if client_os else ()
+    os_pred, os_params = _os_predicate("client_os", client_os)
+    os_clause = f" AND {os_pred}" if os_pred else ""
     with db.upstream() as conn:
         _prewarm_cloud(conn)  # active_clients always classifies IPs
         d_today, d_yesterday, d_weekstart = conn.execute(
@@ -93,7 +93,7 @@ def clients_by_period(timestamp_column: str, granularity: str, date_from=None, d
 
     ``timestamp_column`` is "first_seen" (new clients) or "last_seen" (active).
     ``exclude_cloud`` drops known Google/Apple IPs; ``client_os`` restricts to
-    one platform.
+    one or more platforms.
     Returns ``[{"period": str, "count": int}, ...]`` ordered by period.
     """
     if timestamp_column not in ("first_seen", "last_seen"):
@@ -144,9 +144,11 @@ def active_clients_by_period(granularity, date_from=None, date_to=None, exclude_
     # Snapshots store no OS, so filtering history means joining back to the
     # client's *current* OS (a client absent from `clients` drops out).
     hist_join = _hist_os_join(client_os)
-    if client_os:
-        hist_where.append("c.client_os = ?"); hist_params.append(client_os)
-        live_where.append("client_os = ?"); live_params.append(client_os)
+    hist_pred, hist_os_params = _os_predicate("c.client_os", client_os)
+    live_pred, live_os_params = _os_predicate("client_os", client_os)
+    if hist_pred:
+        hist_where.append(hist_pred); hist_params.extend(hist_os_params)
+        live_where.append(live_pred); live_params.extend(live_os_params)
 
     sql = (
         f"SELECT {period} AS period, COUNT(DISTINCT client_id) AS count FROM ("
@@ -171,8 +173,8 @@ def active_clients_total(date_from, date_to, exclude_cloud=False, client_os=None
     days, counting DISTINCT clients across the whole range (not a sum of days).
     Falls back to pure live when no snapshot store exists.
     """
-    os_clause = " AND client_os = ?" if client_os else ""
-    os_params = [client_os] if client_os else []
+    os_pred, os_params = _os_predicate("client_os", client_os)
+    os_clause = f" AND {os_pred}" if os_pred else ""
 
     if not db.active_store_exists():
         cloud = " AND NOT (is_cloud_ip(last_ip) OR is_cloud_ip(first_ip))" if exclude_cloud else ""
@@ -187,7 +189,8 @@ def active_clients_total(date_from, date_to, exclude_cloud=False, client_os=None
     live_cloud = " AND NOT (is_cloud_ip(last_ip) OR is_cloud_ip(first_ip))" if exclude_cloud else ""
     # See active_clients_by_period: history carries no OS, so join to `clients`.
     hist_join = _hist_os_join(client_os)
-    hist_os = " AND c.client_os = ?" if client_os else ""
+    hist_pred, hist_os_params = _os_predicate("c.client_os", client_os)
+    hist_os = f" AND {hist_pred}" if hist_pred else ""
     sql = (
         "SELECT COUNT(DISTINCT client_id) FROM ("
         f"  SELECT h.client_id FROM hist.daily_active h{hist_join} "
@@ -200,7 +203,7 @@ def active_clients_total(date_from, date_to, exclude_cloud=False, client_os=None
         f"{live_cloud}{os_clause}"
         ")"
     )
-    params = [date_from, date_to] + os_params + [date_from, date_to] + os_params
+    params = [date_from, date_to] + hist_os_params + [date_from, date_to] + os_params
     with db.upstream(attach_active=True) as conn:
         if exclude_cloud:
             _prewarm_cloud(conn)
@@ -213,7 +216,7 @@ def client_rows(timestamp_column: str, sort="last_seen", direction="desc", date_
     ``sort`` is validated against an allow-list; ``direction`` is asc/desc.
     ``limit`` is the page size (falsy/non-positive ⇒ all rows on one page) and
     ``offset`` is the starting row. ``exclude_cloud`` drops known Google/Apple
-    IPs; ``client_os`` restricts to one platform. Returns
+    IPs; ``client_os`` restricts to one or more platforms. Returns
     ``{"total": int, "rows": [...]}`` where ``total`` is the unpaginated count
     for the same filter.
     """
@@ -293,6 +296,20 @@ def _hist_os_join(client_os):
     return " JOIN clients c ON c.uuid = h.client_id" if client_os else ""
 
 
+def _os_predicate(column: str, client_os):
+    """Predicate + params restricting ``column`` to one or more platforms.
+
+    ``client_os`` is a list (possibly empty/None for "all platforms"). Returns
+    ("", []) when there's nothing to filter on, else "<column> IN (?, ...)" with
+    the matching bound params (a single value still uses IN, which SQLite treats
+    the same as ``=``).
+    """
+    if not client_os:
+        return "", []
+    placeholders = ",".join("?" * len(client_os))
+    return f"{column} IN ({placeholders})", list(client_os)
+
+
 def _prewarm_cloud(conn):
     """Resolve all distinct client IPs concurrently so is_cloud_ip hits cache."""
     ips = [r[0] for r in conn.execute(
@@ -308,7 +325,7 @@ def _date_range_where(column: str, date_from, date_to, exclude_cloud=False, clie
     end of the day so timestamps on ``date_to`` are included. When
     ``exclude_cloud`` is True, rows whose first/last IP is a known Google/Apple
     address are dropped (via the ``is_cloud_ip`` SQLite function). ``client_os``
-    restricts to a single platform (bound param, so any value is safe).
+    restricts to one or more platforms (bound params, so any value is safe).
     """
     clauses, params = [], []
     if date_from:
@@ -319,9 +336,10 @@ def _date_range_where(column: str, date_from, date_to, exclude_cloud=False, clie
         params.append(f"{date_to}T23:59:59.999999+00:00")
     if exclude_cloud:
         clauses.append("NOT (is_cloud_ip(last_ip) OR is_cloud_ip(first_ip))")
-    if client_os:
-        clauses.append("client_os = ?")
-        params.append(client_os)
+    os_pred, os_params = _os_predicate("client_os", client_os)
+    if os_pred:
+        clauses.append(os_pred)
+        params.extend(os_params)
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     return where, params
 
