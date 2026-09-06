@@ -10,14 +10,25 @@ from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
 
 from . import queries
+from .messages_api import MessagesApi, MessagesApiError
 
 app = Flask(__name__)
-CORS(app)
+# Scoped to /api/*, which is read-only. The /admin-api/* routes below create,
+# edit and delete broadcast messages, and a cross-origin page must not be able
+# to preflight its way into them just because the operator is on the Tailnet.
+CORS(app, resources={r"/api/*": {"origins": "*"}})
+
+messages_api = MessagesApi()
 
 
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/messages")
+def messages_page():
+    return render_template("messages.html")
 
 
 @app.route("/healthz")
@@ -95,3 +106,55 @@ def api_clients():
 @app.route("/api/notifications")
 def api_notifications():
     return jsonify(queries.notifications_with_alias())
+
+
+# ---- messages admin -------------------------------------------------------
+# The dashboard proxies the messages service's admin API so the x-admin-key
+# stays server-side. These are under /admin-api/ rather than /api/ because they
+# write, and the CORS policy above deliberately does not cover them.
+
+
+@app.errorhandler(MessagesApiError)
+def _messages_api_error(exc):
+    """Relay the messages service's own message and status.
+
+    Its validation strings are written for the person composing the message;
+    rewording them here would put a second vocabulary in front of one set of
+    rules.
+    """
+    return jsonify(error=exc.message), exc.status
+
+
+def _body() -> dict:
+    return request.get_json(silent=True) or {}
+
+
+@app.route("/admin-api/messages", methods=["GET", "POST"])
+def admin_api_messages():
+    if request.method == "POST":
+        return jsonify(messages_api.create(_body())), 201
+    return jsonify(messages=messages_api.list_messages())
+
+
+@app.route("/admin-api/messages/<message_id>", methods=["GET", "PUT", "DELETE"])
+def admin_api_message(message_id):
+    if request.method == "PUT":
+        return jsonify(messages_api.update(message_id, _body()))
+    if request.method == "DELETE":
+        return jsonify(messages_api.delete(message_id))
+    return jsonify(messages_api.get(message_id))
+
+
+@app.route("/admin-api/messages/<message_id>/enabled", methods=["POST"])
+def admin_api_message_enabled(message_id):
+    return jsonify(messages_api.set_enabled(message_id, bool(_body().get("enabled"))))
+
+
+@app.route("/admin-api/audience", methods=["POST"])
+def admin_api_audience():
+    return jsonify(messages_api.audience(_body()))
+
+
+@app.route("/admin-api/preview", methods=["POST"])
+def admin_api_preview():
+    return jsonify(messages_api.preview(_body().get("body", "")))

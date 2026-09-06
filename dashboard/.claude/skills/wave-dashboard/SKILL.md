@@ -13,13 +13,18 @@ change charts, tables, columns, or data sources.
 
 ```
 src/
-├── main.py       # Flask app: HTML page route + /api/* JSON endpoints
-├── config.py     # DB path settings (env-overridable, with on-disk defaults)
-├── db.py         # read-only sqlite connection helpers (+ ATTACH for cross-db joins)
-├── queries.py    # ALL SQL lives here, returned as plain dicts/lists
-├── templates/    # base.html (shell + Chart.js CDN), index.html (page content)
-└── static/       # dashboard.js (fetch + render), style.css
+├── main.py          # Flask app: HTML page routes + /api/* and /admin-api/* JSON endpoints
+├── config.py        # DB path settings (env-overridable, with on-disk defaults)
+├── db.py            # read-only sqlite connection helpers (+ ATTACH for cross-db joins)
+├── queries.py       # ALL SQL lives here, returned as plain dicts/lists
+├── messages_api.py  # HTTP client for the messages service's admin API
+├── templates/       # base.html (shell + nav), index.html, messages.html
+└── static/          # dashboard.js, messages.js, style.css
 ```
+
+Two pages. `base.html` carries the nav and a `{% block scripts %}` that each
+page overrides with its own script — `dashboard.js` reaches for elements that
+only exist on the clients page, so it must not load on the others.
 
 Data flow: `dashboard.js` fetches an `/api/...` endpoint → the route in `main.py` calls a function
 in `queries.py` → that function opens a read-only connection via `db.py`. Keep SQL in `queries.py`,
@@ -157,6 +162,29 @@ table (`renderNotifications` + `NOTIF_COLUMNS`) is the simplest template to copy
    `upstream(attach_notifications=True)` ATTACHes notifications.db as schema `notif`).
 3. Query it from `queries.py` as usual.
 4. Remember: connections are always opened `mode=ro`; never write to source DBs.
+
+## The Messages page
+
+`/messages` composes the broadcast messages the app and the web app show. It is
+the one page that is not backed by a SQLite read:
+
+- **It talks HTTP, not SQL.** Messages live in the messages service's own
+  database, which that service writes. The page calls `/admin-api/*` on this
+  app, which forwards to `http://thewave-messages:5005/admin/*` with the
+  `x-admin-key` from `MESSAGES_ADMIN_KEY`. The key never reaches the browser,
+  and the dashboard's read-only-connections rule survives intact. Do not be
+  tempted to open `messages.db` directly — it is a *writable* database, and the
+  invariant is documented in three places for a reason.
+- **`/admin-api/*`, not `/api/*`, because it writes.** `CORS(app)` is scoped to
+  `/api/*` so a cross-origin page cannot preflight its way into the write
+  endpoints just because the operator is on the Tailnet.
+- **The server owns both hard bits.** Markdown preview renders the parse tree
+  returned by `POST /admin/preview` rather than parsing in JS, and
+  `messages_api.py` converts London wall-clock to UTC on submit and back for
+  display. Adding a second markdown parser or doing timezone maths in
+  `messages.js` reintroduces exactly what those two choices avoid.
+- Errors from the service are relayed verbatim, status and all — its validation
+  strings are written for the person composing the message.
 
 ## Conventions to keep
 

@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+
+{% block title %}Waveform — Messages{% endblock %}
+
+{% block content %}
+<section class="table-block">
+  <h2>Messages <span class="sub">broadcast to the app and the web</span></h2>
+  <div class="table-scroll">
+    <table id="table-messages"></table>
+  </div>
+  <p class="note" id="messages-note"></p>
+  <button id="new-message">New message</button>
+</section>
+
+<section class="table-block" id="compose" hidden>
+  <h2 id="compose-title">New message</h2>
+
+  <div class="compose-grid">
+    <div class="compose-fields">
+      <label>Title
+        <input type="text" id="f-title" maxlength="100" placeholder="Lagoon closed Tuesday">
+      </label>
+
+      <label>Body
+        <textarea id="f-body" rows="8" placeholder="The lagoon is closed for **maintenance**."></textarea>
+      </label>
+
+      <div class="field-row">
+        <label>Display
+          <select id="f-display">
+            <option value="modal">Modal</option>
+            <option value="banner" selected>Banner</option>
+            <option value="inbox">Inbox</option>
+          </select>
+        </label>
+        <label>Level
+          <select id="f-level">
+            <option value="info" selected>Info</option>
+            <option value="warning">Warning</option>
+          </select>
+        </label>
+        <label>Priority
+          <input type="number" id="f-priority" value="0" step="1">
+        </label>
+      </div>
+
+      <div class="field-row">
+        <label>Action label
+          <input type="text" id="f-action-label" maxlength="30" placeholder="Book now">
+        </label>
+        <label>Action URL
+          <input type="text" id="f-action-url" placeholder="https://thewave.com">
+        </label>
+      </div>
+
+      <h3>When <span class="sub">Europe/London</span></h3>
+      <div class="field-row">
+        <label>Starts
+          <input type="datetime-local" id="f-starts-at">
+        </label>
+        <label>Ends
+          <input type="datetime-local" id="f-ends-at">
+        </label>
+        <label>Expires
+          <input type="datetime-local" id="f-expires-at">
+        </label>
+      </div>
+      <label class="check"><input type="checkbox" id="f-retain"> Keep in the inbox after it is read</label>
+
+      <h3>Who</h3>
+      <div class="field-row">
+        <label>OS
+          <div class="ms-dropdown" id="f-os">
+            <button type="button" class="ms-toggle" id="f-os-toggle">All</button>
+            <div class="ms-panel" id="f-os-panel" hidden>
+              <label><input type="checkbox" value="android"> Android</label>
+              <label><input type="checkbox" value="ios"> iOS</label>
+              <label><input type="checkbox" value="web"> Web</label>
+            </div>
+          </div>
+        </label>
+        <label>Min version
+          <input type="text" id="f-min-version" placeholder="1.2.0">
+        </label>
+        <label>Max version
+          <input type="text" id="f-max-version" placeholder="2.0.0">
+        </label>
+      </div>
+      <div class="field-row">
+        <label>Min days seen
+          <input type="number" id="f-min-days" min="0" step="1">
+        </label>
+        <label>Max days seen
+          <input type="number" id="f-max-days" min="0" step="1">
+        </label>
+        <label>Client IDs <span class="sub">comma-separated, blank for all</span>
+          <input type="text" id="f-client-ids" placeholder="">
+        </label>
+      </div>
+
+      <label class="check" id="bump-row" hidden>
+        <input type="checkbox" id="f-bump-revision">
+        Re-show to clients who have already seen it
+      </label>
+
+      <div class="compose-actions">
+        <button id="save-message">Save</button>
+        <button id="cancel-message" class="secondary">Cancel</button>
+        <span class="compose-error" id="compose-error"></span>
+      </div>
+    </div>
+
+    <aside class="compose-side">
+      <h3>Preview</h3>
+      <div class="preview-card">
+        <div class="preview-title" id="preview-title"></div>
+        <div class="preview-body" id="preview-body"></div>
+        <div class="preview-action" id="preview-action" hidden></div>
+      </div>
+      <p class="note" id="preview-error"></p>
+
+      <h3>Audience</h3>
+      <p class="audience" id="audience">–</p>
+      <p class="note">Clients matching these rules right now. Ignores the
+        schedule and anyone who has already seen it.</p>
+    </aside>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='messages.js') }}"></script>
+{% endblock %}

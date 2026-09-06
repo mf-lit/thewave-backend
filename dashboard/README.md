@@ -2,11 +2,17 @@
 
 A small Flask + Chart.js web dashboard over The Wave's SQLite data.
 
-It shows:
+Two pages, linked from the header.
+
+**Clients** (`/`) shows:
 - **New clients per day** (by `first_seen`) and **active clients per day** (by `last_seen`*) as charts
 - **Configurable detail tables** for both (date range, day/week/month granularity, click-to-sort, column toggles)
 - An **OS filter** (Android / iOS / web) applying to the badges, charts, and clients table
 - A **notifications list** with each client's alias
+
+**Messages** (`/messages`) composes and retracts the broadcast messages the app
+and the web app show — a list with ack and audience counts, and a compose form
+with a live preview and a live audience count.
 
 \* The active-clients chart is approximate: `last_seen` only records each client's *most recent*
 day, so it skews toward recent dates and is not a true daily-active count.
@@ -21,6 +27,12 @@ day, so it skews toward recent dates and is not a true daily-active count.
 Aliases are matched on `notifications.client_id = clients.uuid`. Both databases are opened
 read-only (`mode=ro`); the dashboard never writes to them.
 
+The Messages page is the reason that rule still holds. Messages live in a third
+database, and it is **not** in this table: the page talks to the messages
+service's admin API over HTTP (`src/messages_api.py`), so the dashboard gains
+no write connection. Set `MESSAGES_API_URL` and `MESSAGES_ADMIN_KEY`; with the
+key unset the page says so rather than failing obscurely.
+
 ## Run locally
 
 ```bash
@@ -34,12 +46,13 @@ real DB paths above. Override with `UPSTREAM_DB_PATH` / `NOTIFICATIONS_DB_PATH` 
 
 ```
 src/
-├── main.py       # Flask app + routes
-├── config.py     # DB path config
-├── db.py         # read-only sqlite connections (+ ATTACH for cross-db joins)
-├── queries.py    # all SQL
-├── templates/    # base.html, index.html
-└── static/       # dashboard.js, style.css
+├── main.py          # Flask app + routes
+├── config.py        # DB path and messages-API config
+├── db.py            # read-only sqlite connections (+ ATTACH for cross-db joins)
+├── queries.py       # all SQL
+├── messages_api.py  # HTTP client for the messages admin API; the London/UTC boundary
+├── templates/       # base.html, index.html, messages.html
+└── static/          # dashboard.js, messages.js, style.css
 ```
 
 To extend the dashboard, use the `wave-dashboard` Claude Code skill (`.claude/skills/wave-dashboard/`).

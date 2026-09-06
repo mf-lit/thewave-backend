@@ -10,10 +10,18 @@
 <body>
   <header>
     <h1>Waveform Dashboard</h1>
+    <nav>
+      <a href="{{ url_for('index') }}" class="{{ 'here' if request.endpoint == 'index' }}">Clients</a>
+      <a href="{{ url_for('messages_page') }}" class="{{ 'here' if request.endpoint == 'messages_page' }}">Messages</a>
+    </nav>
   </header>
   <main>
     {% block content %}{% endblock %}
   </main>
+  {# Each page loads its own script: dashboard.js reaches for elements that
+     only exist on the clients page, so it must not run on the others. #}
+  {% block scripts %}
   <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+  {% endblock %}
 </body>
 </html>

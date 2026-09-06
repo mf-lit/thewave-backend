@@ -27,3 +27,12 @@ DAILY_ACTIVE_DB_PATH = os.environ.get(
     "DAILY_ACTIVE_DB_PATH",
     os.path.join(_PROJECT_ROOT, "data", "daily_active.db"),
 )
+
+# The messages service's admin API, reached over the Docker network. Not a
+# database path: the messages database is written through that service, so the
+# dashboard talks HTTP to it and keeps its own "read-only connections" rule.
+MESSAGES_API_URL = os.environ.get("MESSAGES_API_URL", "http://thewave-messages:5005")
+
+# Its x-admin-key. Unset means the Messages page reports that it is not
+# configured rather than failing obscurely on every request.
+MESSAGES_ADMIN_KEY = os.environ.get("MESSAGES_ADMIN_KEY", "")
