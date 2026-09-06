@@ -27,6 +27,22 @@ resource "cloudflare_ruleset" "block_invalid_api_paths" {
     enabled     = true
   }
 
+  # /admin/* is not in the allow-list, and that is the whole point: the messages
+  # service's admin API creates and retracts broadcast messages, and it is
+  # reachable only over the docker network — from the dashboard and from
+  # `docker exec`. This rule is what makes that true from the internet's side.
+  rules {
+    description = "messages-api: only /health, /messages and /messages/acks are real routes"
+    expression  = <<-EOT
+      (http.host in {${join(" ", [for h in var.messages_hostnames : "\"${h}\""])}})
+      and not (
+        http.request.uri.path in {"/health" "/messages" "/messages/acks"}
+      )
+    EOT
+    action      = var.rule_action
+    enabled     = true
+  }
+
   rules {
     description = "upstream-api: only /calendar, /water-temperature, /wave-weather are real routes"
     expression  = <<-EOT
@@ -43,12 +59,12 @@ resource "cloudflare_ruleset" "block_invalid_api_paths" {
   # assets, canvaskit), so only its API surface is worth constraining. nginx
   # already 404s anything else under /api/; this keeps it off the tunnel.
   rules {
-    description = "webapp: only /api/calendar and /api/wave-weather are proxied"
+    description = "webapp: only /api/calendar, /api/wave-weather and /api/messages* are proxied"
     expression  = <<-EOT
       (http.host eq "${var.webapp_hostname}")
       and starts_with(http.request.uri.path, "/api/")
       and not (
-        http.request.uri.path in {"/api/calendar" "/api/wave-weather"}
+        http.request.uri.path in {"/api/calendar" "/api/wave-weather" "/api/messages" "/api/messages/acks"}
       )
     EOT
     action      = var.rule_action
@@ -105,10 +121,11 @@ resource "cloudflare_ruleset" "block_invalid_api_paths" {
 # http_request_cache_settings would address the same object, and the two would
 # clobber each other on every apply.
 #
-# Their expressions are mutually exclusive - /api/ against not /api/ - so
-# exactly one matches any given request. That is deliberate: it means nothing
-# here depends on how Cloudflare resolves precedence between overlapping cache
-# rules, which is easy to get wrong and invisible when you do.
+# Their expressions are mutually exclusive - /api/messages against the rest of
+# /api/ against not /api/ - so exactly one matches any given request. That is
+# deliberate: it means nothing here depends on how Cloudflare resolves
+# precedence between overlapping cache rules, which is easy to get wrong and
+# invisible when you do.
 #
 # This resource is the only cache configuration for the host. An earlier note
 # here warned that the dashboard already held an equivalent rule by hand, and
@@ -133,11 +150,37 @@ resource "cloudflare_ruleset" "webapp_cache" {
   # reaches the tunnel at all. nginx sends max-age=300 on both endpoints, which
   # sits inside upstream-api's own 540s cache, so the edge never serves anything
   # staler than the origin would have.
+  # /api/messages is per-client and must never be cached. The cache key here is
+  # URL and query string only - a custom key including a header is Enterprise,
+  # and this zone is on Free - so a cached response would be replayed to every
+  # other web visitor at that URL, serving one user's targeted messages to all
+  # of them. That is a disclosure, not a staleness bug, which is why this is an
+  # explicit cache=false rule rather than a reliance on Cloudflare's default
+  # for extensionless paths or on the origin's no-store.
+  #
+  # It must come with the exclusion in the next rule's expression. A rule that
+  # says "do not cache" alongside one that says "cache" is a precedence
+  # question; two rules that cannot both match is not.
   rules {
-    description = "webapp /api/*: cache, honouring the origin's max-age"
+    description = "webapp /api/messages*: never cache, the response is per-client"
+    expression  = <<-EOT
+      (http.host eq "${var.webapp_hostname}")
+      and starts_with(http.request.uri.path, "/api/messages")
+    EOT
+    action      = "set_cache_settings"
+    enabled     = true
+
+    action_parameters {
+      cache = false
+    }
+  }
+
+  rules {
+    description = "webapp /api/* except messages: cache, honouring the origin's max-age"
     expression  = <<-EOT
       (http.host eq "${var.webapp_hostname}")
       and starts_with(http.request.uri.path, "/api/")
+      and not starts_with(http.request.uri.path, "/api/messages")
     EOT
     action      = "set_cache_settings"
     enabled     = true

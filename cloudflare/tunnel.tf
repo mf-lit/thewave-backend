@@ -34,6 +34,11 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "wave" {
     }
 
     ingress_rule {
+      hostname = "wave-messages.vq5.net"
+      service  = "http://thewave-messages:5005"
+    }
+
+    ingress_rule {
       hostname = "waveform.vq5.net"
       service  = "http://thewave-webapp:80"
     }

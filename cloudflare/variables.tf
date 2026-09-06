@@ -25,6 +25,12 @@ variable "notifications_hostnames" {
   default     = ["wave-notifications.vq5.net"]
 }
 
+variable "messages_hostnames" {
+  description = "Public hostnames the tunnel routes to messages-api. A list for the same reason as notifications_hostnames above. Note that /admin/* is deliberately absent from the rule these feed: the admin surface is served only over the docker network."
+  type        = list(string)
+  default     = ["wave-messages.vq5.net"]
+}
+
 variable "upstream_api_hostnames" {
   description = "Public hostnames the tunnel routes to upstream-api. A list for the same reason as notifications_hostnames above."
   type        = list(string)
