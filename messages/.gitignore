@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+
+# Testing
+.pytest_cache/
+.coverage
+
+# The database lives in a mounted volume, never in the tree
+*.db
+*.db-wal
+*.db-shm
+data/
+
+# Config with the API and admin keys; config.yaml.example is committed
+config/config.yaml
+
+# Logs
+*.log

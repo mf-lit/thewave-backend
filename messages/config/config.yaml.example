@@ -1,0 +1,12 @@
+# Client keys, sent as `x-api-key`. Every /messages request needs one.
+api_keys:
+  - <key>
+
+# Admin keys, sent as `x-admin-key`. These reach /admin/*, which creates and
+# retracts messages — keep them separate from the client keys above, which
+# ship inside the app and the webapp's nginx config.
+#
+# With this list empty the admin routes are not registered at all, so a
+# misconfigured deploy serves no admin surface rather than an open one.
+admin_keys:
+  - <key>

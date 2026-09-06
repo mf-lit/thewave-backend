@@ -1,0 +1,192 @@
+"""Who sees a message.
+
+A pure module: no database, no Flask, no clock of its own. The repository
+loads the enabled rows and the calling client's ack map, and everything else
+is decided here — which is what makes the whole rule set unit-testable without
+a database, and is the reason the two edge cases below can be tested directly.
+
+**Filtering happens in Python, not SQL**, deliberately. The table holds tens of
+rows, so there is nothing to gain from pushing it down, and two of the axes are
+wrong in SQL: version comparison under string ordering makes ``"1.0.9"``
+greater than ``"1.0.10"``, and ``client_ids``/``os`` are JSON.
+
+Every axis narrows independently and they AND together. A message that sets
+none of them goes to everyone, which is the common case — a closure notice or
+a release note.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Iterable, List, Mapping, Optional, Protocol
+
+from . import versions
+from .clock import parse_iso
+from .models import Message
+
+
+class AudienceRules(Protocol):
+    """The six fields that describe *who*, with no reference to when.
+
+    Both a stored ``Message`` and an unsaved ``AudienceRequest`` satisfy this,
+    which is what lets the dashboard count a draft's audience with the same
+    code that serves the real thing — rather than a second implementation that
+    can quietly disagree with the first.
+    """
+
+    client_ids: Optional[List[str]]
+    os: Optional[List[str]]
+    min_version: Optional[str]
+    max_version: Optional[str]
+    min_days_count: Optional[int]
+    max_days_count: Optional[int]
+
+# What a client with no row in upstream-api's `clients` table is treated as.
+# A fresh install may call /messages before it has ever called /calendar, and
+# "maximally new" is the honest reading of a client we have never seen.
+DEFAULT_DAYS_COUNT = 1
+
+
+@dataclass(frozen=True)
+class Client:
+    """The caller, as the targeting rules see them."""
+
+    client_id: str
+    client_os: Optional[str] = None
+    client_version: Optional[str] = None
+    days_count: int = DEFAULT_DAYS_COUNT
+
+    @classmethod
+    def build(
+        cls,
+        client_id: str,
+        client_os: Optional[str] = None,
+        client_version: Optional[str] = None,
+        days_count: Optional[int] = None,
+    ) -> "Client":
+        """Assemble a caller from request headers and a directory lookup.
+
+        ``days_count`` is Optional here and not on the dataclass because None
+        is what the directory returns for an unknown client — the substitution
+        belongs at the boundary, once, rather than at every read.
+        """
+        return cls(
+            client_id=client_id,
+            client_os=client_os.strip().lower() if isinstance(client_os, str) else None,
+            client_version=client_version,
+            days_count=DEFAULT_DAYS_COUNT if days_count is None else days_count,
+        )
+
+
+def _within_window(message: Message, now: datetime) -> bool:
+    """Whether ``now`` falls in ``[starts_at, ends_at)``.
+
+    The start is inclusive and the end exclusive, so a message set to end at
+    the moment another starts does not show both.
+
+    An unparseable ``starts_at`` matches nothing. The column is NOT NULL and
+    validated on write, so the only way to get one is a hand-edited row in
+    sqlite-web — and a message nobody can see is a far better failure than one
+    that goes to everyone at a time nobody chose.
+    """
+    starts_at = parse_iso(message.starts_at)
+    if starts_at is None or starts_at > now:
+        return False
+
+    if message.ends_at is None:
+        return True
+    ends_at = parse_iso(message.ends_at)
+    return ends_at is not None and now < ends_at
+
+
+def _in_list(allowed: Optional[List[str]], value: Optional[str]) -> bool:
+    """Membership in a targeting list, where an absent list constrains nothing.
+
+    A missing ``value`` — no ``X-Client-OS`` header — is excluded whenever the
+    list is set and included when it is not: the same fail-closed-on-the-
+    constraint rule ``versions.in_range`` applies to a missing version.
+    """
+    if not allowed:
+        return True
+    return value is not None and value in allowed
+
+
+def _in_count_range(
+    value: int, minimum: Optional[int], maximum: Optional[int]
+) -> bool:
+    """Inclusive on both ends, and unbounded on an end left as None."""
+    if minimum is not None and value < minimum:
+        return False
+    return maximum is None or value <= maximum
+
+
+def audience_matches(rules: AudienceRules, client: Client) -> bool:
+    """Whether ``client`` is in the audience these rules describe.
+
+    Who, not when: nothing here reads ``enabled``, the window, or the acks. It
+    is the whole of what the admin audience count asks, and part of what
+    ``matches`` asks.
+    """
+    if not _in_list(rules.client_ids, client.client_id):
+        return False
+    if not _in_list(rules.os, client.client_os):
+        return False
+    if not versions.in_range(
+        client.client_version, rules.min_version, rules.max_version
+    ):
+        return False
+    return _in_count_range(
+        client.days_count, rules.min_days_count, rules.max_days_count
+    )
+
+
+def matches(
+    message: Message,
+    client: Client,
+    acked_revision: Optional[int],
+    now: datetime,
+) -> bool:
+    """Whether this one message should be served to this one client."""
+    if not message.enabled:
+        return False
+    if not _within_window(message, now):
+        return False
+    if not audience_matches(message, client):
+        return False
+    # An ack suppresses the revision it names and every earlier one. Bumping
+    # `revision` past it is what re-serves an edited message to someone who has
+    # already seen the old wording.
+    return acked_revision is None or acked_revision < message.revision
+
+
+def sort_key(message: Message):
+    """Highest priority first, then newest, then stable.
+
+    The client shows at most one modal per foreground and sends the rest to the
+    inbox, so this order decides which one that is. ``message_id`` breaks the
+    remaining ties so two messages created in the same second do not swap
+    places between requests.
+    """
+    starts_at = parse_iso(message.starts_at)
+    return (
+        -message.priority,
+        # Negating a datetime is not available, so sort on the ascending key
+        # and reverse it by ordering the tuple's earlier fields descending.
+        starts_at.timestamp() * -1 if starts_at else 0,
+        message.message_id,
+    )
+
+
+def select(
+    messages: Iterable[Message],
+    client: Client,
+    acked: Mapping[str, int],
+    now: datetime,
+) -> List[Message]:
+    """The messages ``client`` should be served, in the order to show them."""
+    wanted = [
+        message
+        for message in messages
+        if matches(message, client, acked.get(message.message_id), now)
+    ]
+    return sorted(wanted, key=sort_key)
