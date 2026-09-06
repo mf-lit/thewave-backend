@@ -109,10 +109,39 @@ services:
       # like dashboard/sqlite-web.
       - "${TAILSCALE_IP}:5004:80"
     environment:
-      # nginx injects this as x-api-key on its two /api/* proxy_pass blocks, so
-      # the browser bundle carries no key. Its own entry in upstream-api's
-      # config.yaml, revocable without touching installed mobile apps.
+      # nginx injects these as x-api-key on its /api/* proxy_pass blocks, so
+      # the browser bundle carries no key. Each is its own entry in the target
+      # service's config.yaml, revocable without touching installed mobile apps.
       - UPSTREAM_API_KEY=${WEBAPP_UPSTREAM_API_KEY}
+      - MESSAGES_API_KEY=${WEBAPP_MESSAGES_API_KEY}
+    restart: unless-stopped
+
+  messages-api:
+    build:
+      context: ./messages
+      dockerfile: Dockerfile
+    container_name: thewave-messages-api
+    networks:
+      default:
+        aliases:
+          # The tunnel's ingress rule for wave-messages.vq5.net and the
+          # dashboard's MESSAGES_API_URL both point here by this name, not by
+          # the container name — same arrangement as thewave-notifications.
+          - thewave-messages
+    ports:
+      - "5005:5005"
+    volumes:
+      - /thewave/docker_vols/messages/config:/app/config:ro
+      - /thewave/docker_vols/messages/data:/app/data
+      # Read-only in intent, read-write on the mount, and deliberately so: these
+      # are WAL-mode databases, so even a sqlite mode=ro connection needs to
+      # create -wal/-shm sidecars in the directory. Same reasoning as the
+      # dashboard and sqlite-web mounts below. The service only ever opens it
+      # with mode=ro (messages/src/directory.py).
+      - /thewave/docker_vols/upstream-api/data:/data/upstream-api
+    environment:
+      - PYTHONUNBUFFERED=1
+      - UPSTREAM_DB_PATH=/data/upstream-api/water_temperature.db
     restart: unless-stopped
 
   log-alerter:
@@ -123,7 +152,7 @@ services:
       - WIREPUSHER_TYPE=log-alert       # optional, customize in the app under "Types"
       - LOG_PATTERN=error|exception|fatal|panic
       - COOLDOWN=60
-      - CONTAINERS=thewave-notifications-api thewave-notifications-worker thewave-upstream-api thewave-webapp          # leave unset to watch all
+      - CONTAINERS=thewave-notifications-api thewave-notifications-worker thewave-upstream-api thewave-webapp thewave-messages-api          # leave unset to watch all
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
@@ -186,6 +215,11 @@ services:
       - UPSTREAM_DB_PATH=/data/upstream-api/water_temperature.db
       - NOTIFICATIONS_DB_PATH=/data/notifications/notifications.db
       - DAILY_ACTIVE_DB_PATH=/app/data/daily_active.db
+      # The Messages page proxies the messages service's admin API over the
+      # docker network. No messages.db mount: that database is written by its
+      # own service, and the dashboard's read-only-connections rule holds.
+      - MESSAGES_API_URL=http://thewave-messages:5005
+      - MESSAGES_ADMIN_KEY=${MESSAGES_ADMIN_KEY}
       - PYTHONUNBUFFERED=1
       - FLASK_ENV=production
     restart: unless-stopped
