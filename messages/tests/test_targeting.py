@@ -179,3 +179,55 @@ def test_axes_and_together():
     assert served(message, caller(days_count=1, client_os="android")) is False
     assert served(message, caller(days_count=1, client_version="0.9.0")) is False
     assert served(message, caller(days_count=2)) is False
+
+
+# ------------------------------------------------- retained messages refresh
+
+
+def test_a_retained_message_keeps_being_served_after_it_is_acked():
+    """The only channel by which a filed message can be told to leave an inbox.
+
+    `expires_at` is an instruction the client acts on out of its stored copy, so
+    an edit to it reaches nobody unless the message is still arriving.
+    """
+    assert served(make_message(retain=True), acked=1) is True
+
+
+def test_a_non_retained_message_still_stops_at_its_ack():
+    """Shown once and dropped, so there is nothing to refresh."""
+    assert served(make_message(retain=False), acked=1) is False
+
+
+def test_the_refresh_stops_when_the_message_stops_being_live():
+    """`ends_at` is the propagation window; past it there is no channel left."""
+    ended = make_message(retain=True, ends_at=(NOW - timedelta(hours=1)).isoformat())
+    assert served(ended, acked=1) is False
+
+    disabled = make_message(retain=True, enabled=False)
+    assert served(disabled, acked=1) is False
+
+
+def test_the_refresh_still_respects_targeting():
+    """A refresh is a delivery, so it narrows the same way one does."""
+    message = make_message(retain=True, os=["android"])
+    assert served(message, acked=1) is False
+
+
+def test_an_expiry_inside_the_window_is_what_expires_it_from_inboxes():
+    """The whole point: the client receives the new expires_at and prunes.
+
+    The server does not stop serving it — it cannot, or the client would never
+    hear. Pruning is the client's, out of the value it was just handed.
+    """
+    expiring = make_message(
+        retain=True,
+        ends_at=(NOW + timedelta(days=30)).isoformat(),
+        expires_at=(NOW - timedelta(minutes=1)).isoformat(),
+    )
+    assert served(expiring, acked=1) is True
+
+
+def test_a_revision_bump_is_still_what_makes_it_show_again():
+    """Refreshing is not re-showing; the client's seen-set keys on the revision."""
+    assert served(make_message(retain=True, revision=2), acked=1) is True
+    assert served(make_message(retain=False, revision=2), acked=1) is True

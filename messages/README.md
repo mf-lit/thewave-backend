@@ -174,7 +174,8 @@ A message is served to a client when **all** of these hold:
   inclusive;
 - the caller's `days_count` is within `[min_days_count, max_days_count]`,
   inclusive;
-- the client has not acked it at the current `revision`.
+- the client has not acked it at the current `revision` — **unless it is
+  retained**, which keeps being served; see below.
 
 An empty list and a missing one mean the same thing — everyone — and are
 stored the same way, as NULL.
@@ -190,6 +191,31 @@ Two edge cases decided deliberately:
 
 Editing a message does not re-serve it. Bumping its `revision` does — an ack
 only suppresses the revision it names.
+
+## Retained messages keep arriving
+
+A `retain` message stays in the payload after the client has acked it, for as
+long as it is live. Everything else stops at its ack, as before.
+
+This exists so `expires_at` can be changed. It is an instruction the client
+acts on out of the copy it stored, so an edit to it reaches nobody unless the
+message is still arriving — without this, a retained message's expiry is fixed
+the moment a client files it, and "drop this from every inbox" is
+unimplementable.
+
+**To expire a retained message from inboxes that already hold it**, set
+`expires_at` to now and leave everything else alone. Do *not* bump the revision
+and do *not* pull `ends_at` back: the message has to stay live long enough for
+clients to poll and pick the new value up, which is one `ttl` — 15 minutes.
+`ends_at` is therefore the propagation window; if it has already passed, push
+it forward first.
+
+`expires_at` is deliberately unconstrained by `ends_at` in either direction. It
+was once required to be at or after it, which forbade exactly this edit.
+
+The client must not re-show a refreshed message: its seen-set keys on
+`(message_id, revision)`, and a revision bump is still what makes something
+appear again.
 
 ## Holding a banner on screen
 

@@ -523,3 +523,65 @@ def test_admin_round_trips_the_delay(client, admin_auth):
     )
     assert created.status_code == 201
     assert created.get_json()["dismissable_after"] == "5m"
+
+
+# --------------------------------------- expiring a retained message in place
+
+
+def test_a_retained_message_keeps_arriving_and_carries_the_new_expiry(client, services):
+    """End to end: the operator's edit reaches an inbox that already holds it."""
+    message = seed(services, title="Filed", retain=True, display="inbox")
+
+    # The client receives it and files it away.
+    first = client.get("/messages", headers=headers()).get_json()["messages"]
+    assert [m["title"] for m in first] == ["Filed"]
+    client.post(
+        "/messages/acks",
+        json={"client_id": CLIENT_ID,
+              "acks": [{"message_id": message.message_id, "revision": 1}]},
+        headers={"x-api-key": API_KEY},
+    )
+
+    # Still served, because it is retained — this is what the change buys.
+    again = client.get("/messages", headers=headers()).get_json()["messages"]
+    assert [m["title"] for m in again] == ["Filed"]
+    assert again[0]["revision"] == 1, "still revision 1, so the client will not re-show it"
+
+    # The operator expires it. No revision bump: it should leave the inbox,
+    # not appear again.
+    services.messages.update(
+        message.message_id,
+        MessageRequest.from_payload(
+            make_payload(title="Filed", retain=True, display="inbox",
+                         expires_at="2020-01-01T00:00:00Z")
+        ),
+    )
+
+    served = client.get("/messages", headers=headers()).get_json()["messages"]
+    assert served[0]["expires_at"] == "2020-01-01T00:00:00+00:00"
+    assert served[0]["revision"] == 1
+
+
+def test_an_acked_non_retained_message_stays_gone(client, services):
+    message = seed(services, title="Once", retain=False)
+    client.post(
+        "/messages/acks",
+        json={"client_id": CLIENT_ID,
+              "acks": [{"message_id": message.message_id, "revision": 1}]},
+        headers={"x-api-key": API_KEY},
+    )
+    assert client.get("/messages", headers=headers()).get_json()["messages"] == []
+
+
+def test_expires_at_may_now_precede_ends_at(client, admin_auth):
+    """The rule that used to forbid exactly the edit above."""
+    response = client.post(
+        "/admin/messages",
+        json=make_payload(retain=True, display="inbox",
+                          starts_at="2026-10-01T09:00:00Z",
+                          ends_at="2026-10-05T09:00:00Z",
+                          expires_at="2026-10-02T09:00:00Z"),
+        headers=admin_auth,
+    )
+    assert response.status_code == 201
+    assert response.get_json()["expires_at"] == "2026-10-02T09:00:00+00:00"

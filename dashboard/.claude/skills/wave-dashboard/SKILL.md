@@ -185,6 +185,11 @@ the one page that is not backed by a SQLite read:
   `messages.js` reintroduces exactly what those two choices avoid.
 - Errors from the service are relayed verbatim, status and all — its validation
   strings are written for the person composing the message.
+- **Expiring a retained message is an `expires_at` edit, nothing else.** Set it
+  to now and save. Retained messages keep being served after a client acks them
+  precisely so this reaches inboxes that already hold one; bumping the revision
+  would re-show it, and pulling Ends back would stop it reaching anyone. The
+  Expires help text says so — keep it accurate if the rule moves.
 - **Help text lives in one place.** The `?` beside a compose field is a
   `<button class="help" data-help="…">`; the wording is the `HELP` map in
   `messages.js`, and `wireHelp()` opens one shared `.help-box` for all of them.

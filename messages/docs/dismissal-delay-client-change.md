@@ -64,10 +64,9 @@ it by taking the later of the two.
   Held only in memory, backgrounding and reopening the app restarts the
   countdown and the user faces the same lock again. This is the most likely bug
   in this change.
-- **The lock is entirely yours.** The server does not enforce it and keeps
-  serving the message until you ack it. Ack on **show**, exactly as before —
-  acking is not dismissing, and the two are unrelated. A banner can be acked
-  and still locked.
+- **The lock is entirely yours.** The server does not enforce it. Ack on
+  **show**, exactly as before — acking is not dismissing, and the two are
+  unrelated. A banner can be acked and still locked.
 - **`"0s"` is valid** and means no delay, the same as `null`. Do not treat it as
   a special case; the arithmetic already gives the right answer.
 - **A long delay is legitimate.** There is no cap, so `"999h"` on a banner with

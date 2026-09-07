@@ -53,7 +53,6 @@ PRIORITY_ERROR = "priority must be an integer"
 ACTION_PAIR_ERROR = "action_url and action_label must be set together, or neither"
 ACTION_URL_SCHEME_ERROR = f"Invalid action_url. URLs must start with '{URL_SCHEME}'"
 STARTS_BEFORE_ENDS_ERROR = "starts_at must be earlier than ends_at"
-EXPIRES_AFTER_ENDS_ERROR = "expires_at must not be earlier than ends_at"
 VERSION_ORDER_ERROR = "min_version must not be greater than max_version"
 DAYS_COUNT_ORDER_ERROR = "min_days_count must not be greater than max_days_count"
 
@@ -503,14 +502,14 @@ class MessageRequest:
 
         if ends_at is not None and not parse_iso(starts_at) < parse_iso(ends_at):
             raise ValidationError(STARTS_BEFORE_ENDS_ERROR)
-        # `expires_at` is when a retained message leaves the inbox, and a
-        # message cannot leave the inbox before it has stopped being served.
-        if (
-            ends_at is not None
-            and expires_at is not None
-            and parse_iso(expires_at) < parse_iso(ends_at)
-        ):
-            raise ValidationError(EXPIRES_AFTER_ENDS_ERROR)
+
+        # `expires_at` was once required to be at or after `ends_at`, on the
+        # reasoning that a message cannot leave the inbox before it has stopped
+        # being served. That is backwards. `expires_at` is a client-side
+        # instruction carried in the payload, and the only way to revise it is
+        # to keep delivering the message — so "expire this from every inbox
+        # now" is precisely an `expires_at` brought back inside the delivery
+        # window, which the old rule forbade. See `targeting.matches`.
 
         # Rejected rather than ignored on a modal or an inbox entry, the same
         # way notifications rejects a day filter on a type that names one

@@ -425,8 +425,13 @@ const HELP = {
   expires_at: [
     "Expires",
     "Only meaningful with “Keep in the inbox” on: when a retained message should " +
-      "leave the client's local inbox. Blank means never. It may not be earlier " +
-      "than Ends, and filling in Ends pre-fills it to match.",
+      "leave the client's local inbox. Blank means never. Filling in Ends " +
+      "pre-fills it to match.",
+    "It is also how you clear a message from inboxes that already hold it — set " +
+      "it to now and leave everything else alone. Retained messages keep being " +
+      "sent, so clients pick the new value up on their next poll, within 15 " +
+      "minutes. Do not bump the revision (that re-shows it) or pull Ends back " +
+      "(that stops it reaching anyone).",
   ],
   retain: [
     "Keep in the inbox",

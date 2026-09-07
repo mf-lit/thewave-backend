@@ -85,6 +85,10 @@ local development and fail on `waveform.vq5.net`.
 The server serves a message until the client acks it. There is no other
 mechanism — no read flag, no per-user list.
 
+**One exception: a `retain: true` message keeps arriving after you ack it**, for
+as long as it is live. See "Retained messages keep arriving" below — you must
+not re-show it, and the seen-set you are already keeping is what stops you.
+
 - Ack a message once you have **shown** it, not when the user dismisses it. A
   modal the user swipes away has still been shown.
 - An ack names a `revision`. It suppresses that revision and every earlier one.
@@ -107,11 +111,36 @@ stops that.
 
 - `retain: false` — show it, ack it, drop it. Nothing persists.
 - `retain: true` — show it, ack it, and **keep it in a local inbox** so the user
-  can find it again. Persist it yourself; the server will not send it a second
-  time. Follow the single-JSON-blob pattern in
-  `wetsuit_storage_service.dart` (`prefs.setString` of a `jsonEncode`d list).
+  can find it again. Persist it yourself, following the single-JSON-blob pattern
+  in `wetsuit_storage_service.dart` (`prefs.setString` of a `jsonEncode`d list).
+  The server does keep sending it, but only so you can refresh that copy — see
+  below.
 - `expires_at` (nullable, UTC ISO-8601) is when a retained message should leave
   that local inbox. `null` means never. Only meaningful when `retain` is true.
+
+### Retained messages keep arriving
+
+A retained message stays in every `GET /messages` payload after you have acked
+it, until it stops being live. This is deliberate and is the one place the ack
+rule bends.
+
+**Why:** `expires_at` is an instruction you act on out of the copy you stored.
+If the message stopped arriving at its ack, an operator could never change it —
+a retained message's expiry would be fixed the moment you filed it, and "drop
+this from every inbox" would be impossible. Refreshing is the channel.
+
+What you must do:
+
+- **Overwrite your stored copy from every payload.** `expires_at` in particular
+  can move, and the newest value wins. An `expires_at` in the past means prune
+  it now.
+- **Do not re-show it.** Your seen-set keyed `<message_id>:<revision>` already
+  covers this: same revision, already shown, so file it silently. A **revision
+  bump** is still the only thing that makes a message appear again.
+- **Do not re-ack it.** Harmless if you do — the upsert is idempotent — but
+  pointless.
+
+A non-retained message still stops dead at its ack, exactly as before.
 
 ## Display rules
 
@@ -247,7 +276,8 @@ them as assertions, not as messages to surface to the user.
 3. A `TextSpan` body parser for the six constructs. No new dependency.
 4. Ack on **show**, batched, plus a local seen-set keyed
    `<message_id>:<revision>`.
-5. A local inbox for `retain: true`, pruned on `expires_at`.
+5. A local inbox for `retain: true`, pruned on `expires_at` — refreshing the
+   stored copy on every poll, since retained messages keep arriving.
 6. One modal per foreground, in the order served; the rest to the inbox.
 7. For a banner with either dismissal field set, hide the dismiss control until
    `min(dismissable_at, first_shown_at + dismissable_after)`, persisting

@@ -164,13 +164,14 @@ def test_window_ordering():
         starts_at="2026-10-01T09:00:00Z",
         ends_at="2026-10-01T09:00:00Z",
     )
-    rejects(
-        models.EXPIRES_AFTER_ENDS_ERROR,
+    # `expires_at` is unconstrained by `ends_at` in either direction. Pulling it
+    # back inside the delivery window is how a retained message is expired out
+    # of inboxes that already hold it — see test_targeting.
+    assert build(
         starts_at="2026-10-01T09:00:00Z",
         ends_at="2026-10-05T09:00:00Z",
         expires_at="2026-10-03T09:00:00Z",
-    )
-    # An expiry with no end is unconstrained: there is nothing to outlast.
+    ).expires_at == "2026-10-03T09:00:00+00:00"
     assert build(expires_at="2026-10-03T09:00:00Z").expires_at is not None
 
 

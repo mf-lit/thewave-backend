@@ -153,10 +153,31 @@ def matches(
         return False
     if not audience_matches(message, client):
         return False
+
     # An ack suppresses the revision it names and every earlier one. Bumping
     # `revision` past it is what re-serves an edited message to someone who has
     # already seen the old wording.
-    return acked_revision is None or acked_revision < message.revision
+    if acked_revision is None or acked_revision < message.revision:
+        return True
+
+    # Acked at the current revision, so it has been seen. A **retained** message
+    # keeps being served anyway, for as long as it is live.
+    #
+    # It is the only channel by which a message already filed in someone's inbox
+    # can be told to leave it. `expires_at` is an instruction the client acts on
+    # locally, out of the copy it stored — so an edit to it reaches nobody
+    # unless the message is still arriving. Without this, a retained message's
+    # expiry is fixed the moment a client files it, and "drop this from
+    # everyone's inbox" is unimplementable.
+    #
+    # The client must not re-show it: its seen-set is keyed on
+    # (message_id, revision), which already covers this, and refreshing the
+    # stored copy on every poll is the whole point. A revision bump is still
+    # what makes it show again.
+    #
+    # Non-retained messages are shown once and dropped, so there is nothing to
+    # refresh and they stop here as they always have.
+    return message.retain
 
 
 def sort_key(message: Message):
