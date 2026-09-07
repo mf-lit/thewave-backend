@@ -246,7 +246,9 @@ was once required to be at or after it, which forbade exactly this edit.
 
 The client must not re-show a refreshed message: its seen-set keys on
 `(message_id, revision)`, and a revision bump is still what makes something
-appear again.
+appear again. It must also not treat absence from a payload as deletion — that
+usually just means `ends_at` passed. See
+`docs/retained-refresh-client-change.md`.
 
 ## Holding a banner on screen
 

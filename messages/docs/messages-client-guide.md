@@ -123,6 +123,10 @@ stops that.
 
 ### Retained messages keep arriving
 
+> Also covered on its own in `retained-refresh-client-change.md`, for an agent
+> already implementing from this guide when the behaviour changed. The two say
+> the same thing — change them together.
+
 A retained message stays in every `GET /messages` payload after you have acked
 it, until it stops being live. This is deliberate and is the one place the ack
 rule bends.
@@ -142,6 +146,9 @@ What you must do:
   bump** is still the only thing that makes a message appear again.
 - **Do not re-ack it.** Harmless if you do — the upsert is idempotent — but
   pointless.
+- **Never delete a retained message merely because it stopped arriving.** Absence
+  from the payload usually means it passed its `ends_at`, and the user should
+  still be able to read it until it expires. Reconcile forwards only.
 
 A non-retained message still stops dead at its ack, exactly as before.
 
