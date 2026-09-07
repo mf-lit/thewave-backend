@@ -126,6 +126,10 @@ not more blocking.
 
 ### Banners that cannot be dismissed yet
 
+> Also covered on its own in `dismissal-delay-client-change.md`, for an agent
+> already implementing from this guide when the feature landed. The two say the
+> same thing — change them together.
+
 Two optional fields hold a banner on screen so it is actually read. They are
 **always present in the payload**, `null` on anything that is not a banner — so
 read one shape rather than branching on `display` to know which keys exist.

@@ -219,7 +219,7 @@ it stops being served once `ends_at` passes. `0s` is accepted and means no
 delay, the same as leaving it blank.
 
 Neither is enforced server-side; both are served to the client, which does the
-holding. `dismissable_after` stores the unit (`"30s"`, not `30`) for the same
+holding — see `docs/dismissal-delay-client-change.md`. `dismissable_after` stores the unit (`"30s"`, not `30`) for the same
 reason `notifications.time_before` does — the column has to mean something to
 whoever reads it in sqlite-web, and another unit can be added later without
 reinterpreting old rows.
