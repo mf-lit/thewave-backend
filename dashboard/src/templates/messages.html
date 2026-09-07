@@ -17,59 +17,86 @@
 
   <div class="compose-grid">
     <div class="compose-fields">
-      <label>Title
+      <label><span class="lbl">Title</span>
         <input type="text" id="f-title" maxlength="100" placeholder="Lagoon closed Tuesday">
       </label>
 
-      <label>Body
+      <label>
+        <span class="lbl">Body <button type="button" class="help" data-help="body">?</button></span>
         <textarea id="f-body" rows="8" placeholder="The lagoon is closed for **maintenance**."></textarea>
       </label>
 
       <div class="field-row">
-        <label>Display
+        <label>
+          <span class="lbl">Display <button type="button" class="help" data-help="display">?</button></span>
           <select id="f-display">
             <option value="modal">Modal</option>
             <option value="banner" selected>Banner</option>
             <option value="inbox">Inbox</option>
           </select>
         </label>
-        <label>Level
+        <label>
+          <span class="lbl">Level <button type="button" class="help" data-help="level">?</button></span>
           <select id="f-level">
             <option value="info" selected>Info</option>
             <option value="warning">Warning</option>
           </select>
         </label>
-        <label>Priority
+        <label>
+          <span class="lbl">Priority <button type="button" class="help" data-help="priority">?</button></span>
           <input type="number" id="f-priority" value="0" step="1">
         </label>
       </div>
 
       <div class="field-row">
-        <label>Action label
+        <label>
+          <span class="lbl">Action label <button type="button" class="help" data-help="action_label">?</button></span>
           <input type="text" id="f-action-label" maxlength="30" placeholder="Book now">
         </label>
-        <label>Action URL
+        <label>
+          <span class="lbl">Action URL <button type="button" class="help" data-help="action_url">?</button></span>
           <input type="text" id="f-action-url" placeholder="https://thewave.com">
         </label>
       </div>
 
       <h3>When <span class="sub">Europe/London</span></h3>
       <div class="field-row">
-        <label>Starts
+        <label>
+          <span class="lbl">Starts <button type="button" class="help" data-help="starts_at">?</button></span>
           <input type="datetime-local" id="f-starts-at">
         </label>
-        <label>Ends
+        <label>
+          <span class="lbl">Ends <button type="button" class="help" data-help="ends_at">?</button></span>
           <input type="datetime-local" id="f-ends-at">
         </label>
-        <label>Expires
+        <label>
+          <span class="lbl">Expires <button type="button" class="help" data-help="expires_at">?</button></span>
           <input type="datetime-local" id="f-expires-at">
         </label>
       </div>
-      <label class="check"><input type="checkbox" id="f-retain"> Keep in the inbox after it is read</label>
+      <label class="check"><input type="checkbox" id="f-retain"> Keep in the inbox after it is read
+        <button type="button" class="help" data-help="retain">?</button></label>
+
+      <!-- Banner only. The service rejects these on a modal or an inbox entry
+           rather than ignoring them, so the whole group hides with the type. -->
+      <div id="dismissal-row" hidden>
+        <h3>Holding the banner <span class="sub">banner only</span></h3>
+        <div class="field-row">
+          <label>
+            <span class="lbl">Dismissable at <button type="button" class="help" data-help="dismissable_at">?</button></span>
+            <input type="datetime-local" id="f-dismissable-at">
+          </label>
+          <label>
+            <span class="lbl">Dismissable after <button type="button" class="help" data-help="dismissable_after">?</button></span>
+            <input type="text" id="f-dismissable-after" placeholder="30s">
+          </label>
+        </div>
+      </div>
 
       <h3>Who</h3>
       <div class="field-row">
-        <label>OS
+        <label>
+          <span class="lbl">OS <button type="button" class="help" data-help="os">?</button></span>
           <div class="ms-dropdown" id="f-os">
             <button type="button" class="ms-toggle" id="f-os-toggle">All</button>
             <div class="ms-panel" id="f-os-panel" hidden>
@@ -79,21 +106,27 @@
             </div>
           </div>
         </label>
-        <label>Min version
+        <label>
+          <span class="lbl">Min version <button type="button" class="help" data-help="min_version">?</button></span>
           <input type="text" id="f-min-version" placeholder="1.2.0">
         </label>
-        <label>Max version
+        <label>
+          <span class="lbl">Max version <button type="button" class="help" data-help="max_version">?</button></span>
           <input type="text" id="f-max-version" placeholder="2.0.0">
         </label>
       </div>
       <div class="field-row">
-        <label>Min days seen
+        <label>
+          <span class="lbl">Min days seen <button type="button" class="help" data-help="min_days">?</button></span>
           <input type="number" id="f-min-days" min="0" step="1">
         </label>
-        <label>Max days seen
+        <label>
+          <span class="lbl">Max days seen <button type="button" class="help" data-help="max_days">?</button></span>
           <input type="number" id="f-max-days" min="0" step="1">
         </label>
-        <label>Client IDs <span class="sub">comma-separated, blank for all</span>
+        <label>
+          <span class="lbl">Client IDs <span class="sub">comma-separated, blank for all</span>
+            <button type="button" class="help" data-help="client_ids">?</button></span>
           <input type="text" id="f-client-ids" placeholder="">
         </label>
       </div>
@@ -101,6 +134,7 @@
       <label class="check" id="bump-row" hidden>
         <input type="checkbox" id="f-bump-revision">
         Re-show to clients who have already seen it
+        <button type="button" class="help" data-help="bump_revision">?</button>
       </label>
 
       <div class="compose-actions">

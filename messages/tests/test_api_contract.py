@@ -107,6 +107,8 @@ def test_get_messages_serves_the_client_shape_and_a_ttl(client, services):
         "expires_at",
         "action_url",
         "action_label",
+        "dismissable_at",
+        "dismissable_after",
     }
     assert message["title"] == "Closure"
 
@@ -464,3 +466,60 @@ def test_admin_preview_needs_a_body(client, admin_auth):
     response = client.post("/admin/preview", json={"body": 7}, headers=admin_auth)
     assert response.status_code == 400
     assert error(response) == "Invalid body. Expected text"
+
+
+# --------------------------------------------------- banner dismissal delay
+
+
+def test_dismissal_fields_reach_the_client(client, services):
+    seed(services, display="banner", dismissable_at="2026-10-01T09:00:00Z",
+         dismissable_after="30s")
+
+    message = client.get("/messages", headers=headers()).get_json()["messages"][0]
+    assert message["dismissable_at"] == "2026-10-01T09:00:00+00:00"
+    assert message["dismissable_after"] == "30s"
+
+
+def test_they_are_null_rather_than_absent_on_a_modal(client, services):
+    """One shape for the client to read, not two keyed on display."""
+    seed(services, display="modal")
+
+    message = client.get("/messages", headers=headers()).get_json()["messages"][0]
+    assert message["dismissable_at"] is None
+    assert message["dismissable_after"] is None
+
+
+def test_admin_rejects_a_delay_on_a_modal(client, admin_auth):
+    response = client.post(
+        "/admin/messages",
+        json=make_payload(display="modal", dismissable_after="30s"),
+        headers=admin_auth,
+    )
+    assert response.status_code == 400
+    assert error(response) == "dismissable_after is only valid for banner messages"
+
+
+def test_admin_rejects_a_dismissal_later_than_expiry(client, admin_auth):
+    response = client.post(
+        "/admin/messages",
+        json=make_payload(
+            display="banner",
+            starts_at="2026-10-01T09:00:00Z",
+            ends_at="2026-10-05T09:00:00Z",
+            expires_at="2026-10-06T09:00:00Z",
+            dismissable_at="2026-10-07T09:00:00Z",
+        ),
+        headers=admin_auth,
+    )
+    assert response.status_code == 400
+    assert error(response) == "dismissable_at must not be later than expires_at"
+
+
+def test_admin_round_trips_the_delay(client, admin_auth):
+    created = client.post(
+        "/admin/messages",
+        json=make_payload(display="banner", dismissable_after="  5M  "),
+        headers=admin_auth,
+    )
+    assert created.status_code == 201
+    assert created.get_json()["dismissable_after"] == "5m"

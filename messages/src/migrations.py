@@ -71,8 +71,40 @@ def _migration_001_baseline(conn: sqlite3.Connection) -> None:
     )
 
 
+def _columns(conn: sqlite3.Connection, table: str) -> set:
+    return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _add_column_if_missing(conn: sqlite3.Connection, table: str, column: str, decl: str) -> None:
+    if column not in _columns(conn, table):
+        logger.info("Adding column %s.%s", table, column)
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
+
+def _migration_002_dismissal_delay(conn: sqlite3.Connection) -> None:
+    """How long a banner must stay on screen before it can be dismissed.
+
+    Both nullable, and NULL on both means "dismissable at once" — which is what
+    every row written before this migration reads as, and what the client did
+    for all of them.
+
+    ``dismissable_after`` holds a canonical duration string ("30s", "5m") rather
+    than a count of seconds, following the precedent set by
+    ``notifications.time_before``: the column has to mean something on its own
+    to whoever is reading the table in sqlite-web, and storing the unit means
+    another one can be added later without reinterpreting old rows.
+
+    ``dismissable_at`` is an absolute UTC stamp in the same form as every other
+    timestamp here, so the two are directly comparable without either being
+    parsed.
+    """
+    _add_column_if_missing(conn, "messages", "dismissable_at", "TEXT")
+    _add_column_if_missing(conn, "messages", "dismissable_after", "TEXT")
+
+
 MIGRATIONS: List[Tuple[int, Callable[[sqlite3.Connection], None]]] = [
     (1, _migration_001_baseline),
+    (2, _migration_002_dismissal_delay),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]

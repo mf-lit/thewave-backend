@@ -185,6 +185,19 @@ the one page that is not backed by a SQLite read:
   `messages.js` reintroduces exactly what those two choices avoid.
 - Errors from the service are relayed verbatim, status and all — its validation
   strings are written for the person composing the message.
+- **Help text lives in one place.** The `?` beside a compose field is a
+  `<button class="help" data-help="…">`; the wording is the `HELP` map in
+  `messages.js`, and `wireHelp()` opens one shared `.help-box` for all of them.
+  Add a field, add its entry there — not a `title=` attribute or a second box.
+  These strings describe rules the *messages service* owns (`targeting.py`,
+  `models.py`, `docs/messages-client-guide.md`); change them together.
+- **Banner-only fields hide with the type.** `dismissable_at` /
+  `dismissable_after` hold a banner on screen, and the service *rejects* them on
+  a modal or an inbox message rather than ignoring them. `#dismissal-row` shows
+  and hides on the Display select, and `dismissalPayload()` sends explicit
+  nulls off a banner — otherwise a delay left in the form after switching type
+  turns a save into a 400 with no visible cause. Any future field with that
+  shape wants the same pair of moves.
 
 ## Conventions to keep
 

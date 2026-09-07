@@ -31,7 +31,10 @@ from . import config
 LONDON = ZoneInfo("Europe/London")
 
 # The timestamps an operator types, sent as London wall-clock.
-FORM_FIELDS = ("starts_at", "ends_at", "expires_at")
+#
+# `dismissable_after` is deliberately not here: it is a duration ("30s"), not a
+# moment, so it has no timezone to convert and no local form to render.
+FORM_FIELDS = ("starts_at", "ends_at", "expires_at", "dismissable_at")
 
 # Every timestamp the list displays, London-rendered for reading.
 DISPLAY_FIELDS = FORM_FIELDS + ("created_at", "updated_at")

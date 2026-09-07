@@ -182,6 +182,9 @@ nav a.here { color: var(--accent); border-bottom: 2px solid var(--accent); }
 }
 .compose-fields textarea { resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem; }
 .compose-fields label.check { flex-direction: row; align-items: center; gap: 0.4rem; color: var(--ink); cursor: pointer; }
+/* `display: flex` above outranks the UA rule for [hidden], which is what
+   openCompose() uses to keep the revision-bump row off a new message. */
+.compose-fields > label[hidden] { display: none; }
 
 .compose-actions { display: flex; align-items: center; gap: 1rem; margin-top: 0.5rem; }
 .compose-error { color: #fca5a5; font-size: 0.8rem; }
@@ -210,3 +213,44 @@ nav a.here { color: var(--accent); border-bottom: 2px solid var(--accent); }
   font-weight: 600;
 }
 .audience { font-size: 1.4rem; font-weight: 700; color: var(--accent); margin: 0; font-variant-numeric: tabular-nums; }
+
+/* ---- field help ----------------------------------------------------------- */
+/* A "?" beside a label opens one shared box (see wireHelp in messages.js).
+   The box lives on <body> in page coordinates, so a long explanation is never
+   clipped by .table-scroll or the compose grid, and it scrolls with the field
+   it belongs to. */
+.lbl { display: flex; align-items: center; gap: 0.3rem; }
+.help {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+.help:hover, .help[aria-expanded="true"] { color: var(--accent); border-color: var(--accent); }
+.help-box {
+  position: absolute;
+  z-index: 60;
+  width: max-content;
+  max-width: 22rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--ink);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+.help-box h4 { margin: 0 0 0.3rem; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.help-box p { margin: 0 0 0.5rem; }
+.help-box p:last-child { margin-bottom: 0; }
+.help-box code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.72rem; color: var(--accent2); }

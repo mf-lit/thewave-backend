@@ -13,6 +13,7 @@ reachable only over the Docker network.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import uuid
 from dataclasses import dataclass
@@ -55,6 +56,68 @@ STARTS_BEFORE_ENDS_ERROR = "starts_at must be earlier than ends_at"
 EXPIRES_AFTER_ENDS_ERROR = "expires_at must not be earlier than ends_at"
 VERSION_ORDER_ERROR = "min_version must not be greater than max_version"
 DAYS_COUNT_ORDER_ERROR = "min_days_count must not be greater than max_days_count"
+
+# The two fields that hold a banner on screen. Banner-only, and rejected rather
+# than ignored on the other two display types: a modal is dismissed by tapping
+# it and an inbox entry is never dismissed at all, so either would be a silent
+# no-op — the operator would set a delay, see it stored, and never see it work.
+DISMISSAL_FIELDS: Tuple[str, ...] = ("dismissable_at", "dismissable_after")
+
+# 24 hours. A delay is a floor on how long the banner is unavoidable, and one
+# longer than a day is far more likely a typo — "30h" for "30s" — than an
+# intention. The bound is what turns that slip into a rejection.
+MAX_DISMISSABLE_AFTER_SECONDS = 24 * 60 * 60
+
+_DURATION_UNITS = {"s": 1, "m": 60, "h": 3600}
+_DURATION = re.compile(r"^(\d+)([smh])$")
+
+DISMISSABLE_AFTER_FORMAT_ERROR = (
+    "Invalid dismissable_after. Expected a whole number of seconds, minutes or "
+    "hours, e.g. '30s', '5m', '2h'"
+)
+DISMISSABLE_AFTER_RANGE_ERROR = (
+    f"dismissable_after must be between 1s and {MAX_DISMISSABLE_AFTER_SECONDS // 3600}h"
+)
+DISMISSABLE_AT_AFTER_EXPIRES_ERROR = (
+    "dismissable_at must not be later than expires_at"
+)
+
+
+def _dismissal_only_error(field: str) -> str:
+    return f"{field} is only valid for banner messages"
+
+
+def normalize_duration(value: Any) -> str:
+    """Accept ``30s`` / ``5M`` / ``2h``; return it canonical and lowercased.
+
+    Bounded at both ends. Zero is rejected rather than read as "no delay":
+    omitting the field already says that, so a ``0s`` that arrived is far more
+    likely a form that built it from an empty input, and would create a delay
+    the operator believes in and the client ignores.
+    """
+    if not isinstance(value, str):
+        raise ValidationError(DISMISSABLE_AFTER_FORMAT_ERROR)
+    match = _DURATION.match(value.strip().lower())
+    if not match:
+        raise ValidationError(DISMISSABLE_AFTER_FORMAT_ERROR)
+
+    seconds = int(match.group(1)) * _DURATION_UNITS[match.group(2)]
+    if not 1 <= seconds <= MAX_DISMISSABLE_AFTER_SECONDS:
+        raise ValidationError(DISMISSABLE_AFTER_RANGE_ERROR)
+    return f"{int(match.group(1))}{match.group(2)}"
+
+
+def duration_seconds(value: Any) -> Optional[int]:
+    """A stored duration as a second count, or None if unreadable.
+
+    The read side's counterpart to `normalize_duration`, tolerating whatever is
+    in the column rather than raising — the same rule `decode_list` follows, and
+    for the same reason: one hand-edited row must not take down the endpoint.
+    """
+    if not isinstance(value, str):
+        return None
+    match = _DURATION.match(value.strip().lower())
+    return int(match.group(1)) * _DURATION_UNITS[match.group(2)] if match else None
 
 
 def _version_error(field: str) -> str:
@@ -292,6 +355,8 @@ class Message:
     revision: int
     created_at: str
     updated_at: str
+    dismissable_at: Optional[str] = None
+    dismissable_after: Optional[str] = None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "Message":
@@ -318,6 +383,8 @@ class Message:
             revision=row["revision"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            dismissable_at=row["dismissable_at"],
+            dismissable_after=row["dismissable_after"],
         )
 
     def to_api(self) -> Dict[str, Any]:
@@ -341,6 +408,11 @@ class Message:
             "expires_at": self.expires_at,
             "action_url": self.action_url,
             "action_label": self.action_label,
+            # Always sent, null on the types that cannot use them, so the client
+            # reads one shape rather than branching on `display` to know which
+            # keys exist.
+            "dismissable_at": self.dismissable_at,
+            "dismissable_after": self.dismissable_after,
         }
 
     def to_admin_api(self) -> Dict[str, Any]:
@@ -359,6 +431,8 @@ class Message:
             "ends_at": self.ends_at,
             "retain": self.retain,
             "expires_at": self.expires_at,
+            "dismissable_at": self.dismissable_at,
+            "dismissable_after": self.dismissable_after,
             "display": self.display,
             "level": self.level,
             "priority": self.priority,
@@ -393,6 +467,8 @@ class MessageRequest:
     max_days_count: Optional[int] = None
     action_url: Optional[str] = None
     action_label: Optional[str] = None
+    dismissable_at: Optional[str] = None
+    dismissable_after: Optional[str] = None
 
     @classmethod
     def from_payload(cls, payload: Dict[str, Any]) -> "MessageRequest":
@@ -444,6 +520,32 @@ class MessageRequest:
         ):
             raise ValidationError(EXPIRES_AFTER_ENDS_ERROR)
 
+        # Rejected rather than ignored on a modal or an inbox entry, the same
+        # way notifications rejects a day filter on a type that names one
+        # session. A silently dropped delay is a delay the operator believes is
+        # in force, and the only way to find out otherwise is a user dismissing
+        # something they were not meant to be able to.
+        if display != DISPLAY_BANNER:
+            for name in DISMISSAL_FIELDS:
+                if payload.get(name) is not None:
+                    raise ValidationError(_dismissal_only_error(name))
+
+        dismissable_at = _timestamp(payload, "dismissable_at")
+        dismissable_after = (
+            None
+            if payload.get("dismissable_after") is None
+            else normalize_duration(payload["dismissable_after"])
+        )
+        # The rule the operator asked for: a banner cannot still be locked once
+        # it has expired out of existence. Only checkable when both are set —
+        # a null expires_at is "never", which nothing can be later than.
+        if (
+            dismissable_at is not None
+            and expires_at is not None
+            and parse_iso(dismissable_at) > parse_iso(expires_at)
+        ):
+            raise ValidationError(DISMISSABLE_AT_AFTER_EXPIRES_ERROR)
+
         action_url = payload.get("action_url")
         action_label = payload.get("action_label")
         if (action_url is None) != (action_label is None):
@@ -469,5 +571,7 @@ class MessageRequest:
             expires_at=expires_at,
             action_url=action_url,
             action_label=action_label,
+            dismissable_at=dismissable_at,
+            dismissable_after=dismissable_after,
             **targeting,
         )

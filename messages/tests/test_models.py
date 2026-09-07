@@ -202,3 +202,110 @@ def test_decode_list_never_raises_on_a_hand_edited_row():
 def test_encode_list_round_trips():
     assert models.decode_list(models.encode_list(["ios", "web"])) == ["ios", "web"]
     assert models.encode_list(None) is None
+
+
+# ------------------------------------------------------- banner dismissal delay
+
+
+def banner(**overrides):
+    """A banner, since the dismissal fields are valid on nothing else."""
+    return build(display="banner", **overrides)
+
+
+def test_dismissal_fields_default_to_none():
+    request = banner()
+    assert request.dismissable_at is None
+    assert request.dismissable_after is None
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        ("30s", "30s"),
+        ("5m", "5m"),
+        ("2h", "2h"),
+        ("  5M  ", "5m"),
+        ("1s", "1s"),
+        ("24h", "24h"),
+    ],
+)
+def test_dismissable_after_is_canonicalised(value, expected):
+    assert banner(dismissable_after=value).dismissable_after == expected
+
+
+@pytest.mark.parametrize("value", ["30", "s", "30 s", "1.5m", "-5m", "30d", 30, True, ""])
+def test_dismissable_after_format(value):
+    rejects(models.DISMISSABLE_AFTER_FORMAT_ERROR, display="banner", dismissable_after=value)
+
+
+@pytest.mark.parametrize("value", ["0s", "0m", "0h", "25h", "1500m"])
+def test_dismissable_after_bounds(value):
+    """Zero is a form that built it from an empty input, not "no delay"."""
+    rejects(models.DISMISSABLE_AFTER_RANGE_ERROR, display="banner", dismissable_after=value)
+
+
+def test_dismissable_after_accepts_the_bounds_themselves():
+    assert banner(dismissable_after="1s").dismissable_after == "1s"
+    assert banner(dismissable_after="1440m").dismissable_after == "1440m"
+
+
+def test_dismissable_at_is_canonicalised_to_aware_utc():
+    request = banner(dismissable_at="2026-10-01T09:00:00Z")
+    assert request.dismissable_at == "2026-10-01T09:00:00+00:00"
+    rejects(
+        models._timestamp_error("dismissable_at"),
+        display="banner",
+        dismissable_at="in a bit",
+    )
+
+
+def test_dismissable_at_may_not_be_later_than_expires_at():
+    rejects(
+        models.DISMISSABLE_AT_AFTER_EXPIRES_ERROR,
+        display="banner",
+        starts_at="2026-10-01T09:00:00Z",
+        ends_at="2026-10-05T09:00:00Z",
+        expires_at="2026-10-06T09:00:00Z",
+        dismissable_at="2026-10-07T09:00:00Z",
+    )
+    # Equal is allowed: it becomes dismissable exactly as it expires.
+    assert banner(
+        starts_at="2026-10-01T09:00:00Z",
+        ends_at="2026-10-05T09:00:00Z",
+        expires_at="2026-10-06T09:00:00Z",
+        dismissable_at="2026-10-06T09:00:00Z",
+    ).dismissable_at == "2026-10-06T09:00:00+00:00"
+
+
+def test_a_null_expires_at_constrains_nothing():
+    """Never expiring is not something a dismissal time can be later than."""
+    assert banner(dismissable_at="2099-01-01T00:00:00Z").dismissable_at is not None
+
+
+@pytest.mark.parametrize("display", ["modal", "inbox"])
+@pytest.mark.parametrize("field, value", [("dismissable_at", "2026-10-01T09:00:00Z"),
+                                          ("dismissable_after", "30s")])
+def test_dismissal_fields_are_rejected_on_other_display_types(display, field, value):
+    """Rejected, not ignored — a silently dropped delay is one nobody sees fail."""
+    rejects(models._dismissal_only_error(field), display=display, **{field: value})
+
+
+@pytest.mark.parametrize("display", ["modal", "inbox"])
+def test_an_explicit_null_is_accepted_on_other_display_types(display):
+    """A serialiser that emits nulls for absent fields is not a client bug."""
+    request = build(display=display, dismissable_at=None, dismissable_after=None)
+    assert request.dismissable_at is None
+
+
+def test_both_may_be_set_together():
+    request = banner(dismissable_at="2026-10-01T09:00:00Z", dismissable_after="30s")
+    assert request.dismissable_at == "2026-10-01T09:00:00+00:00"
+    assert request.dismissable_after == "30s"
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [("30s", 30), ("5m", 300), ("2h", 7200), ("nonsense", None), (None, None), (7, None)],
+)
+def test_duration_seconds_never_raises_on_a_hand_edited_row(value, expected):
+    assert models.duration_seconds(value) == expected

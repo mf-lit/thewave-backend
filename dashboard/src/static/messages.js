@@ -184,6 +184,9 @@ function openCompose(row) {
   $("#f-ends-at").value = row ? toInputValue(row.ends_at_local) : "";
   $("#f-expires-at").value = row ? toInputValue(row.expires_at_local) : "";
   $("#f-retain").checked = row ? row.retain : false;
+  $("#f-dismissable-at").value = row ? toInputValue(row.dismissable_at_local) : "";
+  $("#f-dismissable-after").value = row && row.dismissable_after ? row.dismissable_after : "";
+  updateDismissalVisibility();
   $("#f-min-version").value = row && row.min_version ? row.min_version : "";
   $("#f-max-version").value = row && row.max_version ? row.max_version : "";
   $("#f-min-days").value = row && row.min_days_count !== null ? row.min_days_count : "";
@@ -203,6 +206,7 @@ function openCompose(row) {
 
 function closeCompose() {
   editing = null;
+  closeHelp();
   $("#compose").hidden = true;
 }
 
@@ -222,6 +226,23 @@ function targetingPayload() {
   };
 }
 
+// The banner-only pair, and the group that shows and hides with the type.
+function isBanner() {
+  return $("#f-display").value === "banner";
+}
+
+function updateDismissalVisibility() {
+  $("#dismissal-row").hidden = !isBanner();
+}
+
+function dismissalPayload() {
+  if (!isBanner()) return { dismissable_at: null, dismissable_after: null };
+  return {
+    dismissable_at: textOrNull("#f-dismissable-at"),
+    dismissable_after: textOrNull("#f-dismissable-after"),
+  };
+}
+
 function composePayload() {
   const payload = {
     title: $("#f-title").value.trim(),
@@ -235,6 +256,11 @@ function composePayload() {
     expires_at: textOrNull("#f-expires-at"),
     action_url: textOrNull("#f-action-url"),
     action_label: textOrNull("#f-action-label"),
+    // Explicit nulls off a banner, not omitted values: the service rejects
+    // these on the other display types, so a delay left in the form after
+    // switching to Modal would turn a save into a 400 the operator cannot see
+    // the cause of. Clearing them is what the hidden fields already imply.
+    ...dismissalPayload(),
     ...targetingPayload(),
   };
 
@@ -340,6 +366,201 @@ async function refreshAudience() {
   }
 }
 
+// ---- field help -------------------------------------------------------------
+
+// What each non-obvious compose field actually does, keyed by the `data-help`
+// on its "?" button. These are static, author-written strings — the only HTML
+// in this file that is not escaped, and the only place that should stay true.
+// The rules they describe live in the messages service (`targeting.py`,
+// `models.py`, `docs/messages-client-guide.md`); change them together.
+const HELP = {
+  body: [
+    "Body",
+    "A closed markdown subset: <code>**bold**</code>, <code>*italic*</code> and " +
+      "<code>[label](https://…)</code>, with no nesting. The service rejects anything " +
+      "else on save, so the app can parse it without guessing.",
+    "Blank lines split blocks. A block whose <em>every</em> line starts with " +
+      "<code>- </code> is a bullet list; otherwise the lines join into one paragraph " +
+      "with a space — which is why a list needs a blank line above it. Max 2000 " +
+      "characters; the preview shows exactly what the app will draw.",
+  ],
+  display: [
+    "Display",
+    "<strong>Modal</strong> — a dialog, at most one per app foreground. If several " +
+      "match, the highest priority becomes the modal and the rest go to the inbox.",
+    "<strong>Banner</strong> — inline on the schedule screen. " +
+      "<strong>Inbox</strong> — listed only, never interrupts.",
+  ],
+  level: [
+    "Level",
+    "Styling only. A warning is drawn more prominently; it is not more blocking, " +
+      "and it changes nothing about who gets the message or when.",
+  ],
+  priority: [
+    "Priority",
+    "Sort order for a client holding several messages: highest first, then newest. " +
+      "It decides which one becomes that client's single modal. Any integer, " +
+      "negatives included; 0 is fine unless something must jump the queue.",
+  ],
+  action_label: [
+    "Action label",
+    "The text on the button. Both-or-neither with Action URL — fill in both, or " +
+      "leave both blank and the message has no button. Max 30 characters.",
+  ],
+  action_url: [
+    "Action URL",
+    "Where the button opens. Must start with <code>https://</code>. Ignored unless " +
+      "Action label is filled in too.",
+  ],
+  starts_at: [
+    "Starts",
+    "When the message goes live, inclusive. Leave it blank to start now — that is " +
+      "the usual case for a closure notice you are writing as it happens.",
+  ],
+  ends_at: [
+    "Ends",
+    "When it stops being served, exclusive: a message ending at the moment another " +
+      "starts will not overlap it. Blank leaves it running until you disable it.",
+  ],
+  expires_at: [
+    "Expires",
+    "Only meaningful with “Keep in the inbox” on: when a retained message should " +
+      "leave the client's local inbox. Blank means never. It may not be earlier " +
+      "than Ends, and filling in Ends pre-fills it to match.",
+  ],
+  retain: [
+    "Keep in the inbox",
+    "Whether the client files the message in its local inbox after showing it, so " +
+      "the user can find it again. Off means show it once and forget it.",
+    "It has nothing to do with re-sending: a client stops receiving a message as " +
+      "soon as it acks it, retained or not.",
+  ],
+  os: [
+    "OS",
+    "Nothing checked means every platform — the usual case. Once you check some, a " +
+      "client that reports no OS at all is excluded.",
+  ],
+  min_version: [
+    "Min version",
+    "Lowest app version to serve, inclusive. Compared numerically, so 1.0.10 is " +
+      "above 1.0.9, and 1.0 equals 1.0.0.",
+    "Set either bound and clients on an unparseable version (<code>1.2.3-beta</code>) " +
+      "or none at all drop out. With neither bound set they are included.",
+  ],
+  max_version: [
+    "Max version",
+    "Highest app version to serve, inclusive — e.g. to tell people on an old build " +
+      "to update. Blank for no upper bound.",
+  ],
+  min_days: [
+    "Min days seen",
+    "How many days the client has used the app, inclusive — the count upstream-api " +
+      "keeps. Use it to reach established users.",
+    "A client we have never seen counts as 1, so anything above 1 excludes fresh " +
+      "installs as well as genuinely new ones.",
+  ],
+  max_days: [
+    "Max days seen",
+    "The other end of the same count, inclusive. <code>1</code> is the welcome " +
+      "message: brand-new installs only.",
+  ],
+  client_ids: [
+    "Client IDs",
+    "Comma-separated client UUIDs — the way to try a message on your own device " +
+      "before it goes out. Blank means everyone matching the other rules.",
+  ],
+  dismissable_at: [
+    "Dismissable at",
+    "Banners only. Until this moment the user cannot dismiss the banner — it " +
+      "stays on the schedule screen with no way to close it. Blank means " +
+      "dismissable straight away.",
+    "It may not be later than Expires: a banner cannot still be locked once it " +
+      "has gone.",
+  ],
+  dismissable_after: [
+    "Dismissable after",
+    "The same lock, counted from when the client first shows the banner rather " +
+      "than from a fixed time — <code>30s</code>, <code>5m</code>, " +
+      "<code>2h</code>, up to 24h. Use it when what matters is that the message " +
+      "was on screen, not when.",
+    "Set both and the <em>earlier</em> one wins: whichever comes first unlocks " +
+      "the banner. So a short “after” will usually override a later “at”.",
+  ],
+  bump_revision: [
+    "Re-show to clients who have already seen it",
+    "Editing a message does not bring it back: a client that acked it stays quiet. " +
+      "Ticking this bumps the revision, which re-serves it to everyone — how a " +
+      "corrected closure notice reaches the people who saw the wrong one.",
+  ],
+};
+
+let helpBox = null;
+let helpOpenFor = null;
+
+function closeHelp() {
+  if (!helpOpenFor) return;
+  helpOpenFor.setAttribute("aria-expanded", "false");
+  helpOpenFor = null;
+  if (helpBox) helpBox.hidden = true;
+}
+
+function openHelp(button) {
+  const entry = HELP[button.dataset.help];
+  if (!entry) return;
+  const [heading, ...paragraphs] = entry;
+
+  if (!helpBox) {
+    helpBox = document.createElement("div");
+    helpBox.className = "help-box";
+    helpBox.id = "help-box";
+    helpBox.setAttribute("role", "tooltip");
+    document.body.appendChild(helpBox);
+  }
+  helpBox.innerHTML =
+    `<h4>${heading}</h4>` + paragraphs.map((text) => `<p>${text}</p>`).join("");
+  helpBox.hidden = false;
+
+  // Page coordinates, clamped to the viewport: the box is wider than most of
+  // the fields it belongs to, and the right-hand column would push it offscreen.
+  const rect = button.getBoundingClientRect();
+  const margin = 8;
+  const maxLeft =
+    window.scrollX + document.documentElement.clientWidth - helpBox.offsetWidth - margin;
+  const left = Math.max(window.scrollX + margin, Math.min(window.scrollX + rect.left, maxLeft));
+  helpBox.style.left = `${left}px`;
+  helpBox.style.top = `${window.scrollY + rect.bottom + 6}px`;
+
+  button.setAttribute("aria-expanded", "true");
+  helpOpenFor = button;
+}
+
+function wireHelp() {
+  document.querySelectorAll("button.help").forEach((button) => {
+    const entry = HELP[button.dataset.help];
+    button.setAttribute("aria-expanded", "false");
+    button.setAttribute("aria-describedby", "help-box");
+    button.setAttribute("aria-label", entry ? `About ${entry[0]}` : "Help");
+    button.addEventListener("click", (e) => {
+      // Inside a <label>, an unhandled click would focus or toggle the field.
+      e.preventDefault();
+      e.stopPropagation();
+      const wasOpen = helpOpenFor === button;
+      closeHelp();
+      if (!wasOpen) openHelp(button);
+    });
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!helpBox || !helpBox.contains(e.target)) closeHelp();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeHelp();
+  });
+  // The box is positioned once, so anything that moves the field it points at
+  // — the compose section opening, the window reflowing — closes it.
+  window.addEventListener("resize", closeHelp);
+}
+
 // ---- wiring -----------------------------------------------------------------
 
 function updateOSLabel() {
@@ -381,5 +602,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!$("#f-expires-at").value) $("#f-expires-at").value = $("#f-ends-at").value;
   });
 
+  $("#f-display").addEventListener("change", updateDismissalVisibility);
+
+  wireHelp();
   renderList();
 });

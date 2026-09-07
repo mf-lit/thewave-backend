@@ -190,3 +190,31 @@ Two edge cases decided deliberately:
 
 Editing a message does not re-serve it. Bumping its `revision` does — an ack
 only suppresses the revision it names.
+
+## Holding a banner on screen
+
+A banner can be made undismissable for a while, so a closure notice is actually
+read rather than swiped away. Two optional columns, **banner only** — the
+service rejects them on a `modal` or an `inbox` message rather than ignoring
+them, because a silently dropped delay is one the operator believes is in force:
+
+| Column | Meaning |
+|---|---|
+| `dismissable_at` | An absolute UTC time. Before it, the banner cannot be dismissed. |
+| `dismissable_after` | A duration from when the client **first shows** the banner — `30s`, `5m`, `2h`, capped at 24h. |
+
+`dismissable_at` may not be later than `expires_at`: a banner cannot still be
+locked once it has expired out of existence. A null `expires_at` means "never",
+which nothing can be later than, so the rule only bites when both are set.
+
+**Set both and the earlier one wins.** Whichever unlocks first unlocks the
+banner — it is a floor on how long the message is unavoidable, not a guarantee
+of how long it is seen. In practice a short `dismissable_after` will override a
+later `dismissable_at`, since the countdown starts as soon as the client draws
+it. Setting both is only useful when the fixed time might come first.
+
+Neither is enforced server-side; both are served to the client, which does the
+holding. `dismissable_after` stores the unit (`"30s"`, not `30`) for the same
+reason `notifications.time_before` does — the column has to mean something to
+whoever reads it in sqlite-web, and another unit can be added later without
+reinterpreting old rows.

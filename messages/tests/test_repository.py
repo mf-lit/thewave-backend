@@ -173,3 +173,26 @@ def test_acks_are_scoped_to_one_client(repository, client_id):
 
     repository.record_acks(other, [(message.message_id, 1)])
     assert repository.ack_counts() == {message.message_id: 2}
+
+
+def test_dismissal_fields_round_trip(repository):
+    message = create(
+        repository,
+        display="banner",
+        dismissable_at="2026-10-01T09:00:00Z",
+        dismissable_after="30s",
+    )
+    stored = repository.get(message.message_id)
+    assert stored.dismissable_at == "2026-10-01T09:00:00+00:00"
+    assert stored.dismissable_after == "30s"
+
+
+def test_update_clears_a_dismissal_delay_the_new_payload_omits(repository):
+    """A full rewrite: removing the delay from the form removes it from the row."""
+    message = create(repository, display="banner", dismissable_after="5m")
+    updated = repository.update(
+        message.message_id,
+        MessageRequest.from_payload(make_payload(display="banner")),
+    )
+    assert updated.dismissable_after is None
+    assert updated.dismissable_at is None

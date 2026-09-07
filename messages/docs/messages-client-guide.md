@@ -52,7 +52,9 @@ Headers: `x-api-key`, `X-Client-ID` (**required**), `X-Client-OS`,
       "retain": false,
       "expires_at": null,
       "action_url": "https://thewave.com",
-      "action_label": "Book now"
+      "action_label": "Book now",
+      "dismissable_at": null,
+      "dismissable_after": null
     }
   ],
   "ttl": 900
@@ -121,6 +123,47 @@ stops that.
 
 `level` is `info` or `warning` and is styling only: a warning is more prominent,
 not more blocking.
+
+### Banners that cannot be dismissed yet
+
+Two optional fields hold a banner on screen so it is actually read. They are
+**always present in the payload**, `null` on anything that is not a banner — so
+read one shape rather than branching on `display` to know which keys exist.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `dismissable_at` | UTC ISO-8601, nullable | Before this moment, the user cannot dismiss the banner. |
+| `dismissable_after` | duration string, nullable | Same lock, counted from **when you first show it** — `"30s"`, `"5m"`, `"2h"`. |
+
+Both `null` — which is the common case — means dismissable immediately, exactly
+as banners behave today.
+
+**When both are set, the earlier one unlocks it.** Compute the unlock moment as:
+
+```
+min(
+  dismissable_at              (if set),
+  first_shown_at + dismissable_after   (if set)
+)
+```
+
+and hide the dismiss control until then. It is a `min`, not an `and` — whichever
+comes first wins. Because the `dismissable_after` countdown starts the moment you
+draw the banner, a short one will usually beat a later `dismissable_at`; that is
+intended, not a bug to work around.
+
+Three things to get right:
+
+- **Persist `first_shown_at` per message**, alongside your seen-set. Holding it
+  in memory means backgrounding and reopening the app restarts the countdown,
+  and the user faces the same lock again.
+- **Parse `dismissable_after` defensively.** It is `<integer><unit>` with `s`,
+  `m` or `h`, and the server guarantees that shape — but treat anything you
+  cannot parse as "no delay" rather than as "locked forever". Failing open is
+  the right direction: the worst case is a banner the user can close.
+- **The lock is client-side only.** The server does not enforce it and will keep
+  serving the message until you ack it. Ack on show as usual — acking does not
+  dismiss, and the two are unrelated.
 
 `action_url` and `action_label` are **both-or-neither**. When present, render a
 button labelled `action_label` opening `action_url` (`url_launcher` is already
@@ -202,6 +245,9 @@ them as assertions, not as messages to surface to the user.
    `<message_id>:<revision>`.
 5. A local inbox for `retain: true`, pruned on `expires_at`.
 6. One modal per foreground, in the order served; the rest to the inbox.
-7. Poll on startup and resume, throttled by `ttl`.
-8. Verify on web, not just on device — the `X-Client-ID`-on-acks requirement
+7. For a banner with either dismissal field set, hide the dismiss control until
+   `min(dismissable_at, first_shown_at + dismissable_after)`, persisting
+   `first_shown_at` so backgrounding does not restart the countdown.
+8. Poll on startup and resume, throttled by `ttl`.
+9. Verify on web, not just on device — the `X-Client-ID`-on-acks requirement
    only bites there.
