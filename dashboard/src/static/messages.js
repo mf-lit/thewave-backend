@@ -69,6 +69,7 @@ const COLUMNS = [
   { key: "priority", label: "Pri", num: true },
   { key: "window", label: "Window (London)" },
   { key: "enabled", label: "On" },
+  { key: "status", label: "Status" },
   { key: "revision", label: "Rev", num: true },
   { key: "ack_count", label: "Acks", num: true },
   { key: "matched_client_count", label: "Audience", num: true },
@@ -78,8 +79,61 @@ function windowText(row) {
   return `${row.starts_at_local || "—"} → ${row.ends_at_local || "open"}`;
 }
 
+// Where a message is in its life, right now. "On" only says the kill switch has
+// not been thrown; this is the column that says whether anything is happening.
+//
+// Computed from the raw UTC fields, never the London-rendered *_local ones —
+// Date parses the offset, so the comparison is exact wherever the browser is.
+//
+// Precedence matters in one case. Expiring a retained message is done by pulling
+// expires_at back *inside* the delivery window, so for one poll cycle it is both
+// live and expired. Expired wins: it is the more useful fact, and it is still
+// being delivered precisely to tell clients it has gone.
+function messageStatus(row) {
+  const now = Date.now();
+  const at = (value) => (value ? new Date(value).getTime() : null);
+
+  if (!row.enabled) {
+    return { key: "off", label: "off", title: "Disabled. Reaching nobody." };
+  }
+
+  const expires = at(row.expires_at);
+  if (row.retain && expires !== null && now >= expires) {
+    return {
+      key: "expired",
+      label: "expired",
+      title: "Past its expiry. Clients that polled since should have dropped it.",
+    };
+  }
+
+  const starts = at(row.starts_at);
+  if (starts !== null && now < starts) {
+    return { key: "scheduled", label: "scheduled", title: "Not started yet." };
+  }
+
+  const ends = at(row.ends_at);
+  if (ends === null || now < ends) {
+    return { key: "live", label: "live", title: "Being delivered now." };
+  }
+
+  return row.retain
+    ? {
+        key: "kept",
+        label: "kept",
+        title: "Past its window, so no longer delivered — but still in inboxes " +
+          "that hold it, until it expires.",
+      }
+    : { key: "ended", label: "ended", title: "Past its window. Reaching nobody." };
+}
+
 function cell(row, col) {
   if (col.key === "window") return esc(windowText(row));
+  if (col.key === "status") {
+    const state = messageStatus(row);
+    return `<span class="pill st-${state.key}" title="${esc(state.title)}">${esc(
+      state.label
+    )}</span>`;
+  }
   if (col.key === "enabled") {
     return row.enabled
       ? '<span class="pill on">on</span>'

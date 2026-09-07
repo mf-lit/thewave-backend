@@ -207,6 +207,14 @@ the one page that is not backed by a SQLite read:
   `dismissalPayload()` send explicit nulls when hidden — otherwise a value left
   over from before the operator changed either turns a save into a 400 with no
   visible cause. Any future conditional field wants the same pair of moves.
+- **On and Status are different questions.** `On` is the `enabled` kill switch
+  and nothing else; `Status` is `messageStatus()`, which combines the schedule,
+  `retain` and `expires_at` with the current time — off / scheduled / live /
+  kept / ended / expired. It reads the raw UTC fields, never the London
+  `*_local` ones, so the comparison is exact wherever the browser is. Note the
+  precedence: expiring a retained message pulls `expires_at` back *inside* the
+  delivery window, so for one poll cycle a row is both live and expired, and
+  expired wins.
 - **The timeline strip is a picture, not a validator.** `renderTimeline()` plots
   whichever of the four moments are set and applicable, colour-coded by group.
   It parses the datetime-local values in the browser's timezone, which is fine

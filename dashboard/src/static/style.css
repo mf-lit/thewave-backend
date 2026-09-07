@@ -279,3 +279,10 @@ nav a.here { color: var(--accent); border-bottom: 2px solid var(--accent); }
 .tl-delivery .tl-dot { background: var(--accent); }
 .tl-retention .tl-dot { background: var(--accent2); }
 .tl-interaction .tl-dot { background: #f0b357; }
+
+/* Message lifecycle, as distinct from the On/off kill switch. Only `expired`
+   and `off` are muted — the rest are states you would expect to see. */
+.pill.st-live { background: rgba(45, 212, 191, 0.18); color: var(--accent); }
+.pill.st-scheduled { background: rgba(96, 165, 250, 0.18); color: var(--accent2); }
+.pill.st-kept { background: rgba(240, 179, 87, 0.18); color: #f0b357; }
+.pill.st-expired, .pill.st-ended, .pill.st-off { background: var(--border); color: var(--muted); }
