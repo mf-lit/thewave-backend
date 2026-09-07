@@ -74,6 +74,10 @@ it by taking the later of the two.
   That is a choice the operator is allowed to make — do not impose a ceiling of
   your own. What ends it is the message's own window: once `ends_at` passes it
   stops being served at all.
+- **Neither field relates to any other time on the message.** `dismissable_at`
+  may fall after `ends_at` or after `expires_at`; none of those combinations is
+  an error, and none of them means anything special. Compute the unlock moment
+  from these two fields alone.
 
 ## Parse defensively, and fail open
 
@@ -90,9 +94,9 @@ can ever get rid of, on a build you cannot hotfix.
 ## Errors
 
 **None you can cause.** These fields are read-only to the client — you never
-send them. Every rule above (banner-only, the duration format, `dismissable_at`
-not being later than `expires_at`) is enforced on the admin API when the
-operator composes the message, so an invalid combination cannot reach you.
+send them. Both rules that exist (banner-only, and the duration format) are
+enforced on the admin API when the operator composes the message, so an invalid
+value cannot reach you.
 
 `GET /messages` and `POST /messages/acks` are otherwise unchanged, including
 their error responses.
@@ -103,8 +107,8 @@ their error responses.
   `<message_id>:<revision>`, and send `X-Client-ID` as a header on the acks POST
   (still the deployment-only trap on web).
 - **`retain` and `expires_at`** — still only about whether a message stays in
-  the local inbox after it is read. Unrelated to dismissal, despite
-  `dismissable_at` being bounded by `expires_at` on the server.
+  the local inbox after it is read. Entirely unrelated to dismissal: they are a
+  different group of fields with a different owner, and no rule connects them.
 - **Modals and inbox entries**, entirely. One modal per foreground, in the order
   served.
 - Every other field, the body grammar, polling, and the `ttl`.

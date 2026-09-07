@@ -196,13 +196,23 @@ the one page that is not backed by a SQLite read:
   Add a field, add its entry there — not a `title=` attribute or a second box.
   These strings describe rules the *messages service* owns (`targeting.py`,
   `models.py`, `docs/messages-client-guide.md`); change them together.
-- **Banner-only fields hide with the type.** `dismissable_at` /
-  `dismissable_after` hold a banner on screen, and the service *rejects* them on
-  a modal or an inbox message rather than ignoring them. `#dismissal-row` shows
-  and hides on the Display select, and `dismissalPayload()` sends explicit
-  nulls off a banner — otherwise a delay left in the form after switching type
-  turns a save into a 400 with no visible cause. Any future field with that
-  shape wants the same pair of moves.
+- **The compose form is grouped by who owns each time, and the groups hide with
+  their condition.** The five time-valued fields fall into Delivery
+  (`starts_at`, `ends_at` — server), Retention (`retain`, `expires_at` — client)
+  and Interaction (`dismissable_*` — client, banner only), and **no service rule
+  crosses between them**; the headings say so because the alternative is an
+  operator holding all five in their head. The service rejects rather than
+  ignores an inapplicable field, so `#expires-row` follows the Retain checkbox
+  and `#dismissal-row` follows the Display select, and `retentionPayload()` /
+  `dismissalPayload()` send explicit nulls when hidden — otherwise a value left
+  over from before the operator changed either turns a save into a 400 with no
+  visible cause. Any future conditional field wants the same pair of moves.
+- **The timeline strip is a picture, not a validator.** `renderTimeline()` plots
+  whichever of the four moments are set and applicable, colour-coded by group.
+  It parses the datetime-local values in the browser's timezone, which is fine
+  because they are all London wall-clock and only relative position is drawn.
+  No arrangement of these times is illegal, so it must never look like a
+  warning.
 
 ## Conventions to keep
 

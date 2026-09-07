@@ -254,3 +254,28 @@ nav a.here { color: var(--accent); border-bottom: 2px solid var(--accent); }
 .help-box p { margin: 0 0 0.5rem; }
 .help-box p:last-child { margin-bottom: 0; }
 .help-box code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.72rem; color: var(--accent2); }
+
+/* ---- compose timeline ------------------------------------------------------ */
+/* A picture of where the four moments fall relative to each other. Colour codes
+   the three groups the fields belong to, matching the form's headings. */
+.timeline { margin-bottom: 1rem; }
+.tl-track {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--border);
+  margin-bottom: 0.6rem;
+}
+.tl-span {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.tl-key { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.78rem; }
+.tl-key li { display: flex; align-items: center; gap: 0.4rem; }
+.tl-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--muted); }
+.tl-delivery .tl-dot { background: var(--accent); }
+.tl-retention .tl-dot { background: var(--accent2); }
+.tl-interaction .tl-dot { background: #f0b357; }

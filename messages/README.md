@@ -192,6 +192,37 @@ Two edge cases decided deliberately:
 Editing a message does not re-serve it. Bumping its `revision` does — an ack
 only suppresses the revision it names.
 
+## The five time-valued fields
+
+They fall into three groups with three different owners, and **no rule crosses
+between them**:
+
+| Group | Fields | Owner | Question it answers |
+|---|---|---|---|
+| Delivery | `starts_at`, `ends_at` | server | when is it sent? |
+| Retention | `retain`, `expires_at` | client | how long is it kept? |
+| Interaction | `dismissable_at`, `dismissable_after` | client, banner only | when can it be closed? |
+
+The complete rule set is three sentences, and only the first compares two times:
+
+- `starts_at` must be earlier than `ends_at` — a window has to be a window, and
+  both halves are the same idea.
+- `expires_at` requires `retain`.
+- `dismissable_at` / `dismissable_after` require `display: banner`.
+
+Everything else is allowed, including arrangements that look odd and are not:
+an `expires_at` before `ends_at` is how a retained message is cleared from
+inboxes that already hold it, and a `dismissable_at` after `ends_at` is a banner
+nobody can close for its whole life.
+
+Two cross-group comparisons used to live here and both were wrong.
+`expires_at >= ends_at` had it backwards — expiring a message *is* an
+`expires_at` pulled back inside the delivery window. `dismissable_at <=
+expires_at` coupled banner interaction to inbox retention, the two fields with
+least to do with each other; it fired even when `retain` was false and
+`expires_at` therefore meant nothing, and it forbade a mild case while
+permitting the extreme one.
+
 ## Retained messages keep arriving
 
 A `retain` message stays in the payload after the client has acked it, for as
@@ -229,9 +260,9 @@ them, because a silently dropped delay is one the operator believes is in force:
 | `dismissable_at` | An absolute UTC time. Before it, the banner cannot be dismissed. |
 | `dismissable_after` | A duration from when the client **first shows** the banner — `30s`, `5m`, `2h`. |
 
-`dismissable_at` may not be later than `expires_at`: a banner cannot still be
-locked once it has expired out of existence. A null `expires_at` means "never",
-which nothing can be later than, so the rule only bites when both are set.
+Neither is constrained by any other time on the message — see "The five
+time-valued fields" above. A `dismissable_at` past `ends_at` is a banner nobody
+can close for its whole life, which is allowed.
 
 **Set both and the earlier one wins.** Whichever unlocks first unlocks the
 banner — it is a floor on how long the message is unavoidable, not a guarantee

@@ -116,7 +116,10 @@ stops that.
   The server does keep sending it, but only so you can refresh that copy — see
   below.
 - `expires_at` (nullable, UTC ISO-8601) is when a retained message should leave
-  that local inbox. `null` means never. Only meaningful when `retain` is true.
+  that local inbox. `null` means never. It only ever appears with `retain: true`
+  — the server rejects it otherwise — and it has **no relationship to any other
+  time on the message.** It may fall before `ends_at`; that is how a message is
+  cleared from inboxes that already hold it.
 
 ### Retained messages keep arriving
 

@@ -153,6 +153,17 @@ def test_timestamps_are_canonicalised_to_aware_utc():
     rejects(models._timestamp_error("ends_at"), ends_at="soon")
 
 
+def test_expires_at_requires_retain():
+    """On a message the client never files, it describes nothing."""
+    rejects(models.EXPIRES_NEEDS_RETAIN_ERROR, expires_at="2026-10-03T09:00:00Z")
+    rejects(
+        models.EXPIRES_NEEDS_RETAIN_ERROR,
+        retain=False,
+        expires_at="2026-10-03T09:00:00Z",
+    )
+    assert build(retain=True, expires_at="2026-10-03T09:00:00Z").expires_at is not None
+
+
 def test_window_ordering():
     rejects(
         models.STARTS_BEFORE_ENDS_ERROR,
@@ -168,11 +179,11 @@ def test_window_ordering():
     # back inside the delivery window is how a retained message is expired out
     # of inboxes that already hold it — see test_targeting.
     assert build(
+        retain=True,
         starts_at="2026-10-01T09:00:00Z",
         ends_at="2026-10-05T09:00:00Z",
         expires_at="2026-10-03T09:00:00Z",
     ).expires_at == "2026-10-03T09:00:00+00:00"
-    assert build(expires_at="2026-10-03T09:00:00Z").expires_at is not None
 
 
 def test_action_pair_is_both_or_neither():
@@ -261,27 +272,33 @@ def test_dismissable_at_is_canonicalised_to_aware_utc():
     )
 
 
-def test_dismissable_at_may_not_be_later_than_expires_at():
-    rejects(
-        models.DISMISSABLE_AT_AFTER_EXPIRES_ERROR,
-        display="banner",
+def test_dismissal_and_retention_are_independent():
+    """No cross-group rule: interaction and retention do not constrain each other.
+
+    `dismissable_at` after `expires_at` used to be rejected. It coupled the two
+    fields with least to do with each other, fired even when `retain` was false
+    and `expires_at` therefore meant nothing, and forbade a mild case while
+    permitting the extreme one — a `dismissable_at` past `ends_at` is a banner
+    undismissable for its whole life, and that is allowed on purpose.
+    """
+    request = banner(
+        retain=True,
         starts_at="2026-10-01T09:00:00Z",
         ends_at="2026-10-05T09:00:00Z",
         expires_at="2026-10-06T09:00:00Z",
         dismissable_at="2026-10-07T09:00:00Z",
     )
-    # Equal is allowed: it becomes dismissable exactly as it expires.
+    assert request.dismissable_at == "2026-10-07T09:00:00+00:00"
+    assert request.expires_at == "2026-10-06T09:00:00+00:00"
+
+
+def test_a_dismissable_at_beyond_the_window_is_allowed():
+    """An undismissable banner is a choice the operator is allowed to make."""
     assert banner(
         starts_at="2026-10-01T09:00:00Z",
-        ends_at="2026-10-05T09:00:00Z",
-        expires_at="2026-10-06T09:00:00Z",
-        dismissable_at="2026-10-06T09:00:00Z",
-    ).dismissable_at == "2026-10-06T09:00:00+00:00"
-
-
-def test_a_null_expires_at_constrains_nothing():
-    """Never expiring is not something a dismissal time can be later than."""
-    assert banner(dismissable_at="2099-01-01T00:00:00Z").dismissable_at is not None
+        ends_at="2026-10-02T09:00:00Z",
+        dismissable_at="2026-11-01T09:00:00Z",
+    ).dismissable_at is not None
 
 
 @pytest.mark.parametrize("display", ["modal", "inbox"])

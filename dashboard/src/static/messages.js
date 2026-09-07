@@ -186,7 +186,7 @@ function openCompose(row) {
   $("#f-retain").checked = row ? row.retain : false;
   $("#f-dismissable-at").value = row ? toInputValue(row.dismissable_at_local) : "";
   $("#f-dismissable-after").value = row && row.dismissable_after ? row.dismissable_after : "";
-  updateDismissalVisibility();
+  updateGroupVisibility();
   $("#f-min-version").value = row && row.min_version ? row.min_version : "";
   $("#f-max-version").value = row && row.max_version ? row.max_version : "";
   $("#f-min-days").value = row && row.min_days_count !== null ? row.min_days_count : "";
@@ -201,6 +201,7 @@ function openCompose(row) {
 
   refreshPreview();
   refreshAudience();
+  renderTimeline();
   $("#compose").scrollIntoView({ behavior: "smooth" });
 }
 
@@ -226,13 +227,30 @@ function targetingPayload() {
   };
 }
 
-// The banner-only pair, and the group that shows and hides with the type.
+// The five time-valued fields sit in three groups with three owners, and no
+// rule crosses between them:
+//
+//   Delivery     starts_at, ends_at        server: when it is sent
+//   Retention    retain, expires_at        client: how long it is kept
+//   Interaction  dismissable_*             client, banner: when it can be closed
+//
+// Two of the groups are conditional, and the service rejects rather than
+// ignores their fields when they do not apply — so each group hides with its
+// condition and sends explicit nulls when hidden. Otherwise a value left over
+// from before the operator changed Display or Retain turns a save into a 400
+// with no visible cause.
+
 function isBanner() {
   return $("#f-display").value === "banner";
 }
 
-function updateDismissalVisibility() {
+function isRetained() {
+  return $("#f-retain").checked;
+}
+
+function updateGroupVisibility() {
   $("#dismissal-row").hidden = !isBanner();
+  $("#expires-row").hidden = !isRetained();
 }
 
 function dismissalPayload() {
@@ -243,6 +261,13 @@ function dismissalPayload() {
   };
 }
 
+function retentionPayload() {
+  return {
+    retain: isRetained(),
+    expires_at: isRetained() ? textOrNull("#f-expires-at") : null,
+  };
+}
+
 function composePayload() {
   const payload = {
     title: $("#f-title").value.trim(),
@@ -250,16 +275,11 @@ function composePayload() {
     display: $("#f-display").value,
     level: $("#f-level").value,
     priority: parseInt($("#f-priority").value, 10) || 0,
-    retain: $("#f-retain").checked,
     starts_at: textOrNull("#f-starts-at"),
     ends_at: textOrNull("#f-ends-at"),
-    expires_at: textOrNull("#f-expires-at"),
     action_url: textOrNull("#f-action-url"),
     action_label: textOrNull("#f-action-label"),
-    // Explicit nulls off a banner, not omitted values: the service rejects
-    // these on the other display types, so a delay left in the form after
-    // switching to Modal would turn a save into a 400 the operator cannot see
-    // the cause of. Clearing them is what the hidden fields already imply.
+    ...retentionPayload(),
     ...dismissalPayload(),
     ...targetingPayload(),
   };
@@ -351,6 +371,80 @@ async function refreshPreview() {
   }
 }
 
+// ---- timeline ---------------------------------------------------------------
+
+// A strip showing where each of the four moments falls relative to the others,
+// so the operator can see the shape rather than reconstruct it from four
+// separate inputs. It is a picture of what was typed, not a validity check —
+// no arrangement of these is illegal any more.
+//
+// The values are read straight from the datetime-local inputs and parsed in the
+// browser's own timezone. That is fine here because all four are London
+// wall-clock and only their *relative* positions are drawn, so a common offset
+// cancels. A pair spanning a clock change is out by an hour, which at any
+// realistic scale is well under a pixel.
+
+const TIMELINE_MARKS = [
+  { sel: "#f-starts-at", key: "start", label: "Starts", group: "delivery" },
+  { sel: "#f-ends-at", key: "end", label: "Ends", group: "delivery" },
+  { sel: "#f-expires-at", key: "expires", label: "Expires", group: "retention" },
+  { sel: "#f-dismissable-at", key: "dismiss", label: "Dismissable", group: "interaction" },
+];
+
+function timelineValues() {
+  return TIMELINE_MARKS.filter((mark) => {
+    if (mark.group === "retention" && !isRetained()) return false;
+    if (mark.group === "interaction" && !isBanner()) return false;
+    return Boolean($(mark.sel).value);
+  }).map((mark) => ({ ...mark, at: new Date($(mark.sel).value).getTime() }))
+    .filter((mark) => Number.isFinite(mark.at));
+}
+
+function renderTimeline() {
+  const marks = timelineValues();
+  const key = $("#tl-key");
+  const empty = $("#tl-empty");
+  const span = $("#tl-span");
+
+  if (!marks.length) {
+    key.innerHTML = "";
+    span.style.width = "0%";
+    empty.hidden = false;
+    return;
+  }
+  empty.hidden = true;
+
+  // One point, or several at the same instant, has no extent to scale to.
+  const times = marks.map((m) => m.at);
+  const low = Math.min(...times);
+  const high = Math.max(...times);
+  const at = (t) => (high === low ? 50 : ((t - low) / (high - low)) * 100);
+
+  const start = marks.find((m) => m.key === "start");
+  const end = marks.find((m) => m.key === "end");
+  if (start) {
+    const from = at(start.at);
+    // No end means delivery runs off the right-hand side; fill to the edge.
+    span.style.left = `${from}%`;
+    span.style.width = `${(end ? at(end.at) : 100) - from}%`;
+  } else {
+    span.style.left = "0%";
+    span.style.width = end ? `${at(end.at)}%` : "0%";
+  }
+
+  key.innerHTML = marks
+    .slice()
+    .sort((a, b) => a.at - b.at)
+    .map(
+      (mark) =>
+        `<li class="tl-${mark.group}"><span class="tl-dot"></span>` +
+        `${esc(mark.label)} <span class="muted">${esc(
+          $(mark.sel).value.replace("T", " ")
+        )}</span></li>`
+    )
+    .join("");
+}
+
 // ---- live audience ----------------------------------------------------------
 
 async function refreshAudience() {
@@ -424,9 +518,9 @@ const HELP = {
   ],
   expires_at: [
     "Expires",
-    "Only meaningful with “Keep in the inbox” on: when a retained message should " +
-      "leave the client's local inbox. Blank means never. Filling in Ends " +
-      "pre-fills it to match.",
+    "When a retained message should leave the client's local inbox. Blank means " +
+      "never. Retention only — it has no relationship to Ends or to the " +
+      "dismissal times, and is rejected outright without “Keep in the inbox”.",
     "It is also how you clear a message from inboxes that already hold it — set " +
       "it to now and leave everything else alone. Retained messages keep being " +
       "sent, so clients pick the new value up on their next poll, within 15 " +
@@ -479,8 +573,9 @@ const HELP = {
     "Banners only. Until this moment the user cannot dismiss the banner — it " +
       "stays on the schedule screen with no way to close it. Blank means " +
       "dismissable straight away.",
-    "It may not be later than Expires: a banner cannot still be locked once it " +
-      "has gone.",
+    "Interaction only. It does not have to sit inside Delivery: a Dismissable " +
+      "at past Ends is a banner nobody can close for its whole life, which is " +
+      "allowed.",
   ],
   dismissable_after: [
     "Dismissable after",
@@ -605,9 +700,20 @@ document.addEventListener("DOMContentLoaded", () => {
   // an untouched field, so an explicit choice is never overwritten.
   $("#f-ends-at").addEventListener("change", () => {
     if (!$("#f-expires-at").value) $("#f-expires-at").value = $("#f-ends-at").value;
+    renderTimeline();
   });
 
-  $("#f-display").addEventListener("change", updateDismissalVisibility);
+  $("#f-display").addEventListener("change", () => {
+    updateGroupVisibility();
+    renderTimeline();
+  });
+  $("#f-retain").addEventListener("change", () => {
+    updateGroupVisibility();
+    renderTimeline();
+  });
+  [
+    "#f-starts-at", "#f-ends-at", "#f-expires-at", "#f-dismissable-at",
+  ].forEach((sel) => $(sel).addEventListener("change", renderTimeline));
 
   wireHelp();
   renderList();

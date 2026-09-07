@@ -499,20 +499,32 @@ def test_admin_rejects_a_delay_on_a_modal(client, admin_auth):
     assert error(response) == "dismissable_after is only valid for banner messages"
 
 
-def test_admin_rejects_a_dismissal_later_than_expiry(client, admin_auth):
+def test_admin_rejects_an_expiry_on_a_message_that_is_not_retained(client, admin_auth):
+    response = client.post(
+        "/admin/messages",
+        json=make_payload(retain=False, expires_at="2026-10-06T09:00:00Z"),
+        headers=admin_auth,
+    )
+    assert response.status_code == 400
+    assert error(response) == "expires_at is only valid when retain is true"
+
+
+def test_admin_accepts_the_three_time_groups_as_independent(client, admin_auth):
+    """No rule crosses between delivery, retention and interaction."""
     response = client.post(
         "/admin/messages",
         json=make_payload(
             display="banner",
+            retain=True,
             starts_at="2026-10-01T09:00:00Z",
             ends_at="2026-10-05T09:00:00Z",
             expires_at="2026-10-06T09:00:00Z",
             dismissable_at="2026-10-07T09:00:00Z",
+            dismissable_after="5m",
         ),
         headers=admin_auth,
     )
-    assert response.status_code == 400
-    assert error(response) == "dismissable_at must not be later than expires_at"
+    assert response.status_code == 201
 
 
 def test_admin_round_trips_the_delay(client, admin_auth):

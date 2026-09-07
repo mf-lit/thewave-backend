@@ -69,8 +69,11 @@ DISMISSABLE_AFTER_FORMAT_ERROR = (
     "Invalid dismissable_after. Expected a whole number of seconds, minutes or "
     "hours, e.g. '30s', '5m', '2h'"
 )
-DISMISSABLE_AT_AFTER_EXPIRES_ERROR = (
-    "dismissable_at must not be later than expires_at"
+# `expires_at` says when a retained message leaves the client's inbox, so on a
+# message the client never files it describes nothing. Rejected rather than
+# ignored, like every other inapplicable field here.
+EXPIRES_NEEDS_RETAIN_ERROR = (
+    "expires_at is only valid when retain is true"
 )
 
 
@@ -500,16 +503,38 @@ class MessageRequest:
         ends_at = _timestamp(payload, "ends_at")
         expires_at = _timestamp(payload, "expires_at")
 
+        # The one temporal rule left, and the only cross-field one: a window has
+        # to be a window. Both halves belong to the same idea — when is this
+        # delivered — so comparing them is not reaching across concepts.
         if ends_at is not None and not parse_iso(starts_at) < parse_iso(ends_at):
             raise ValidationError(STARTS_BEFORE_ENDS_ERROR)
 
-        # `expires_at` was once required to be at or after `ends_at`, on the
-        # reasoning that a message cannot leave the inbox before it has stopped
-        # being served. That is backwards. `expires_at` is a client-side
-        # instruction carried in the payload, and the only way to revise it is
-        # to keep delivering the message — so "expire this from every inbox
-        # now" is precisely an `expires_at` brought back inside the delivery
-        # window, which the old rule forbade. See `targeting.matches`.
+        # Every other rule below is an applicability question — does this field
+        # mean anything on this kind of message — rather than a comparison
+        # between two times. Two temporal comparisons used to live here and both
+        # were wrong:
+        #
+        #   expires_at >= ends_at        a message cannot leave the inbox before
+        #                                it stops being served. Backwards:
+        #                                expiring one *is* an expires_at pulled
+        #                                back inside the delivery window.
+        #   dismissable_at <= expires_at a banner cannot still be locked once it
+        #                                has expired. It coupled banner
+        #                                interaction to inbox retention — the two
+        #                                fields with least to do with each other —
+        #                                and fired even when `retain` was false
+        #                                and `expires_at` therefore meant
+        #                                nothing. It also forbade a mild case
+        #                                while permitting the extreme one: a
+        #                                dismissable_at past `ends_at`, a banner
+        #                                undismissable for its whole life, is
+        #                                allowed on purpose.
+        #
+        # The three fields now sit in three independent groups: delivery
+        # (starts_at, ends_at), retention (retain, expires_at) and interaction
+        # (dismissable_at, dismissable_after). Nothing crosses between them.
+        if expires_at is not None and not retain:
+            raise ValidationError(EXPIRES_NEEDS_RETAIN_ERROR)
 
         # Rejected rather than ignored on a modal or an inbox entry, the same
         # way notifications rejects a day filter on a type that names one
@@ -527,15 +552,6 @@ class MessageRequest:
             if payload.get("dismissable_after") is None
             else normalize_duration(payload["dismissable_after"])
         )
-        # The rule the operator asked for: a banner cannot still be locked once
-        # it has expired out of existence. Only checkable when both are set —
-        # a null expires_at is "never", which nothing can be later than.
-        if (
-            dismissable_at is not None
-            and expires_at is not None
-            and parse_iso(dismissable_at) > parse_iso(expires_at)
-        ):
-            raise ValidationError(DISMISSABLE_AT_AFTER_EXPIRES_ERROR)
 
         action_url = payload.get("action_url")
         action_label = payload.get("action_label")
