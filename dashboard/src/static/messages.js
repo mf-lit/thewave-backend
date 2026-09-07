@@ -481,8 +481,8 @@ const HELP = {
     "Dismissable after",
     "The same lock, counted from when the client first shows the banner rather " +
       "than from a fixed time — <code>30s</code>, <code>5m</code>, " +
-      "<code>2h</code>, up to 24h. Use it when what matters is that the message " +
-      "was on screen, not when.",
+      "<code>2h</code>. Use it when what matters is that the message was on " +
+      "screen, not when. No upper limit; Ends stops it being served anyway.",
     "Set both and the <em>earlier</em> one wins: whichever comes first unlocks " +
       "the banner. So a short “after” will usually override a later “at”.",
   ],

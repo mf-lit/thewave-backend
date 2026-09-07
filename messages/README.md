@@ -201,7 +201,7 @@ them, because a silently dropped delay is one the operator believes is in force:
 | Column | Meaning |
 |---|---|
 | `dismissable_at` | An absolute UTC time. Before it, the banner cannot be dismissed. |
-| `dismissable_after` | A duration from when the client **first shows** the banner — `30s`, `5m`, `2h`, capped at 24h. |
+| `dismissable_after` | A duration from when the client **first shows** the banner — `30s`, `5m`, `2h`. |
 
 `dismissable_at` may not be later than `expires_at`: a banner cannot still be
 locked once it has expired out of existence. A null `expires_at` means "never",
@@ -212,6 +212,11 @@ banner — it is a floor on how long the message is unavoidable, not a guarantee
 of how long it is seen. In practice a short `dismissable_after` will override a
 later `dismissable_at`, since the countdown starts as soon as the client draws
 it. Setting both is only useful when the fixed time might come first.
+
+`dismissable_after` has no upper bound — how long a banner stays unavoidable is
+the operator's call, and the message's own window bounds it in practice, since
+it stops being served once `ends_at` passes. `0s` is accepted and means no
+delay, the same as leaving it blank.
 
 Neither is enforced server-side; both are served to the client, which does the
 holding. `dismissable_after` stores the unit (`"30s"`, not `30`) for the same

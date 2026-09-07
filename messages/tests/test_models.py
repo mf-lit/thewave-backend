@@ -226,7 +226,8 @@ def test_dismissal_fields_default_to_none():
         ("2h", "2h"),
         ("  5M  ", "5m"),
         ("1s", "1s"),
-        ("24h", "24h"),
+        ("0s", "0s"),
+        ("999h", "999h"),
     ],
 )
 def test_dismissable_after_is_canonicalised(value, expected):
@@ -238,15 +239,15 @@ def test_dismissable_after_format(value):
     rejects(models.DISMISSABLE_AFTER_FORMAT_ERROR, display="banner", dismissable_after=value)
 
 
-@pytest.mark.parametrize("value", ["0s", "0m", "0h", "25h", "1500m"])
-def test_dismissable_after_bounds(value):
-    """Zero is a form that built it from an empty input, not "no delay"."""
-    rejects(models.DISMISSABLE_AFTER_RANGE_ERROR, display="banner", dismissable_after=value)
+@pytest.mark.parametrize("value", ["0s", "1s", "1440m", "25h", "999h"])
+def test_dismissable_after_is_unbounded(value):
+    """Only the shape is checked.
 
-
-def test_dismissable_after_accepts_the_bounds_themselves():
-    assert banner(dismissable_after="1s").dismissable_after == "1s"
-    assert banner(dismissable_after="1440m").dismissable_after == "1440m"
+    How long a banner stays unavoidable is the operator's call, and the window
+    bounds it in practice anyway — once `ends_at` passes it stops being served.
+    `0s` is accepted and means no delay, the same as leaving it blank.
+    """
+    assert banner(dismissable_after=value).dismissable_after == value
 
 
 def test_dismissable_at_is_canonicalised_to_aware_utc():

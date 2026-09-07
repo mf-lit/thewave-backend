@@ -63,20 +63,12 @@ DAYS_COUNT_ORDER_ERROR = "min_days_count must not be greater than max_days_count
 # no-op — the operator would set a delay, see it stored, and never see it work.
 DISMISSAL_FIELDS: Tuple[str, ...] = ("dismissable_at", "dismissable_after")
 
-# 24 hours. A delay is a floor on how long the banner is unavoidable, and one
-# longer than a day is far more likely a typo — "30h" for "30s" — than an
-# intention. The bound is what turns that slip into a rejection.
-MAX_DISMISSABLE_AFTER_SECONDS = 24 * 60 * 60
-
 _DURATION_UNITS = {"s": 1, "m": 60, "h": 3600}
 _DURATION = re.compile(r"^(\d+)([smh])$")
 
 DISMISSABLE_AFTER_FORMAT_ERROR = (
     "Invalid dismissable_after. Expected a whole number of seconds, minutes or "
     "hours, e.g. '30s', '5m', '2h'"
-)
-DISMISSABLE_AFTER_RANGE_ERROR = (
-    f"dismissable_after must be between 1s and {MAX_DISMISSABLE_AFTER_SECONDS // 3600}h"
 )
 DISMISSABLE_AT_AFTER_EXPIRES_ERROR = (
     "dismissable_at must not be later than expires_at"
@@ -90,20 +82,20 @@ def _dismissal_only_error(field: str) -> str:
 def normalize_duration(value: Any) -> str:
     """Accept ``30s`` / ``5M`` / ``2h``; return it canonical and lowercased.
 
-    Bounded at both ends. Zero is rejected rather than read as "no delay":
-    omitting the field already says that, so a ``0s`` that arrived is far more
-    likely a form that built it from an empty input, and would create a delay
-    the operator believes in and the client ignores.
+    Only the shape is checked. There is deliberately no upper bound: how long a
+    banner should stay unavoidable is the operator's call, and a message that
+    cannot be dismissed for the length of a closure is a thing they may
+    legitimately want. ``0s`` is likewise accepted and simply means no delay,
+    the same as leaving the field blank.
+
+    The one thing that does bound this in practice is the banner's own window —
+    once ``ends_at`` passes, the message stops being served at all.
     """
     if not isinstance(value, str):
         raise ValidationError(DISMISSABLE_AFTER_FORMAT_ERROR)
     match = _DURATION.match(value.strip().lower())
     if not match:
         raise ValidationError(DISMISSABLE_AFTER_FORMAT_ERROR)
-
-    seconds = int(match.group(1)) * _DURATION_UNITS[match.group(2)]
-    if not 1 <= seconds <= MAX_DISMISSABLE_AFTER_SECONDS:
-        raise ValidationError(DISMISSABLE_AFTER_RANGE_ERROR)
     return f"{int(match.group(1))}{match.group(2)}"
 
 
