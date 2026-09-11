@@ -169,6 +169,17 @@ class MessagesApi:
             )
         )
 
+    def expire(self, message_id: str):
+        """Revoke: the service moves `expires_at` to now and touches nothing else.
+
+        No payload, deliberately. The one field this writes is a server clock
+        reading, and a browser that sent its own would be sending a time from
+        the wrong machine in the wrong zone.
+        """
+        return with_local_times(
+            self._call("POST", f"/admin/messages/{message_id}/expire")
+        )
+
     def audience(self, payload: dict):
         return self._call("POST", "/admin/audience", payload)
 

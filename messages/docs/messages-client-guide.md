@@ -151,6 +151,12 @@ What you must do:
   from the payload usually means it passed its `ends_at`, and the user should
   still be able to read it until it expires. Reconcile forwards only.
 
+Nothing to implement, but worth knowing: a message you have **never** held is
+not sent to you once its `expires_at` has passed. So an already-expired message
+cannot arrive fresh, be shown, and be pruned in the same breath — if one reaches
+you with a past `expires_at`, it is one you already hold, and it is telling you
+to drop it.
+
 A non-retained message still stops dead at its ack, exactly as before.
 
 ## Display rules

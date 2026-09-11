@@ -10,7 +10,13 @@ from datetime import timedelta
 
 import pytest
 
-from src.targeting import DEFAULT_DAYS_COUNT, Client, matches, select
+from src.targeting import (
+    DEFAULT_DAYS_COUNT,
+    Client,
+    is_being_delivered,
+    matches,
+    select,
+)
 
 from conftest import NOW, make_message
 
@@ -231,3 +237,68 @@ def test_a_revision_bump_is_still_what_makes_it_show_again():
     """Refreshing is not re-showing; the client's seen-set keys on the revision."""
     assert served(make_message(retain=True, revision=2), acked=1) is True
     assert served(make_message(retain=False, revision=2), acked=1) is True
+
+
+# ------------------------------------------------- revoking a retained message
+
+
+def expiring(**overrides):
+    """A live retained message whose inbox copy is already due to be dropped."""
+    fields = dict(
+        retain=True,
+        ends_at=(NOW + timedelta(days=30)).isoformat(),
+        expires_at=(NOW - timedelta(minutes=1)).isoformat(),
+    )
+    fields.update(overrides)
+    return make_message(**fields)
+
+
+def test_an_expired_message_is_not_served_to_a_client_that_never_held_it():
+    """Revoking must not go on showing it to everyone who had not yet seen it.
+
+    Serving it here would show the message, file it, and prune it in the same
+    breath — and the user would have been shown something already withdrawn.
+    """
+    assert served(expiring(), acked=None) is False
+
+
+def test_it_is_still_served_to_the_clients_holding_it():
+    """The refresh channel is the whole mechanism, and this is what it carries."""
+    assert served(expiring(), acked=1) is True
+
+
+def test_a_revision_bump_does_not_bring_back_an_expired_message():
+    """Expired means gone; to show it again, move `expires_at`, not `revision`."""
+    assert served(expiring(revision=2), acked=1) is False
+
+
+def test_an_expiry_still_to_come_changes_nothing():
+    future = expiring(expires_at=(NOW + timedelta(days=1)).isoformat())
+    assert served(future, acked=None) is True
+    assert served(future, acked=1) is True
+
+
+def test_expiry_only_means_anything_on_a_retained_message():
+    """`expires_at` says when a filed copy leaves the inbox; an unfiled message
+    has no filed copy, so it is not a second kind of end date."""
+    not_retained = make_message(
+        retain=False, expires_at=(NOW - timedelta(minutes=1)).isoformat()
+    )
+    assert served(not_retained, acked=None) is True
+
+
+def test_an_unreadable_expiry_keeps_the_message_served():
+    """Fails in the same direction `decode_list` does: a hand-edited row stays."""
+    assert served(expiring(expires_at="not a timestamp"), acked=None) is True
+
+
+def test_is_being_delivered_is_the_question_the_admin_api_asks():
+    """Revoking checks it, so it must be the serving path's own opinion of live."""
+    assert is_being_delivered(make_message(), NOW) is True
+    assert is_being_delivered(make_message(enabled=False), NOW) is False
+    assert is_being_delivered(
+        make_message(ends_at=(NOW - timedelta(hours=1)).isoformat()), NOW
+    ) is False
+    assert is_being_delivered(
+        make_message(starts_at=(NOW + timedelta(hours=1)).isoformat()), NOW
+    ) is False

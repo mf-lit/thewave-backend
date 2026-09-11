@@ -185,11 +185,17 @@ the one page that is not backed by a SQLite read:
   `messages.js` reintroduces exactly what those two choices avoid.
 - Errors from the service are relayed verbatim, status and all — its validation
   strings are written for the person composing the message.
-- **Expiring a retained message is an `expires_at` edit, nothing else.** Set it
-  to now and save. Retained messages keep being served after a client acks them
-  precisely so this reaches inboxes that already hold one; bumping the revision
-  would re-show it, and pulling Ends back would stop it reaching anyone. The
-  Expires help text says so — keep it accurate if the rule moves.
+- **Revoke is the button for "get this out of people's inboxes".** It POSTs to
+  `/admin-api/messages/<id>/expire`, which the service turns into `expires_at =
+  now` and nothing else — no revision bump (that re-shows a message), and no
+  touching `enabled` or Ends, because the message has to keep being delivered or
+  the clients holding it never hear. It renders only on `retain` rows:
+  everything else is shown once and dropped, so Disable already is its revoke.
+  The service refuses a revoke on a message it is not currently delivering, and
+  that is the one row action an operator can actually trip, so `rowAction`
+  catches it and puts the message in `#messages-note` instead of letting it
+  vanish into an unhandled rejection. The same edit by hand — Expires ← now,
+  save — still works, and the Expires help text still describes it.
 - **Help text lives in one place.** The `?` beside a compose field is a
   `<button class="help" data-help="…">`; the wording is the `HELP` map in
   `messages.js`, and `wireHelp()` opens one shared `.help-box` for all of them.

@@ -21,7 +21,7 @@ from flask import Blueprint, current_app, jsonify, request
 from .. import markdown
 from ..clock import utc_now
 from ..models import MAX_BODY_LENGTH, AudienceRequest, MessageRequest, read_flag
-from ..targeting import Client, audience_matches, select
+from ..targeting import Client, audience_matches, is_being_delivered, select
 from ..validation import ValidationError
 from .auth import require_admin_key, require_api_key
 from .handlers import ApiError
@@ -38,6 +38,17 @@ CLIENT_VERSION_HEADER = "X-Client-Version"
 MISSING_CLIENT_ID_ERROR = f"Missing {CLIENT_ID_HEADER} header"
 ACKS_FORMAT_ERROR = "Invalid acks. Expected a list of {message_id, revision} objects"
 NOT_FOUND_ERROR = "Message not found"
+
+# Revoking is an instruction carried to the client inside the message itself,
+# so both of these are the same refusal: there is no channel to carry it.
+REVOKE_NEEDS_RETAIN_ERROR = (
+    "Only a retained message can be revoked. This one is not kept in the "
+    "client's inbox, so there is nothing there to withdraw — disable it instead"
+)
+REVOKE_NEEDS_DELIVERY_ERROR = (
+    "A revocation only reaches clients the message is still being sent to, and "
+    "this one is not being sent. Enable it, or push ends_at forward, then revoke"
+)
 
 # How many client IDs a dry-run audience count returns alongside the number.
 # Enough to eyeball against sqlite-web, far short of exporting the user list.
@@ -234,6 +245,28 @@ def admin_set_enabled(message_id: str):
     if message is None:
         raise ApiError(NOT_FOUND_ERROR, 404)
     return jsonify(message.to_admin_api()), 200
+
+
+@admin_bp.route("/messages/<message_id>/expire", methods=["POST"])
+@require_admin_key
+def admin_expire_message(message_id: str):
+    """Revoke a retained message from the inboxes that already hold it.
+
+    One field, like the kill switch next to it: ``expires_at`` moves to now and
+    nothing else changes. The message stays enabled and live on purpose —
+    that is what carries the new expiry to the clients holding it, and
+    ``targeting`` stops it being *shown* to anyone who was not.
+
+    Both refusals below say the same thing: a revocation travels inside the
+    message, so if the message is not going anywhere, neither is it.
+    """
+    message = _message_or_404(message_id)
+    if not message.retain:
+        raise ValidationError(REVOKE_NEEDS_RETAIN_ERROR)
+    if not is_being_delivered(message, utc_now()):
+        raise ValidationError(REVOKE_NEEDS_DELIVERY_ERROR)
+
+    return jsonify(services().messages.expire(message_id).to_admin_api()), 200
 
 
 @admin_bp.route("/preview", methods=["POST"])

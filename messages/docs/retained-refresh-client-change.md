@@ -30,7 +30,8 @@ only channel.
   `expires_at` in particular moves — that is the point.
 - **Prune on every poll, not only on receipt.** Drop anything whose stored
   `expires_at` is in the past. A message that arrives already expired should be
-  pruned rather than filed.
+  pruned rather than filed — and never *shown*: an expired message only reaches
+  clients that already hold it, so it is a withdrawal, not a new message.
 - **Do not re-ack.** Harmless — the upsert is idempotent — but pointless.
 
 ## The trap: absence is not deletion

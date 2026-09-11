@@ -99,6 +99,33 @@ def _within_window(message: Message, now: datetime) -> bool:
     return ends_at is not None and now < ends_at
 
 
+def is_being_delivered(message: Message, now: datetime) -> bool:
+    """Whether the service is still sending this message to anyone at all.
+
+    The half of ``matches`` that does not depend on who is asking. The admin
+    API calls it to answer "would a revocation reach anyone", so that question
+    and the serving path cannot form different opinions about what live means.
+    """
+    return message.enabled and _within_window(message, now)
+
+
+def has_expired(message: Message, now: datetime) -> bool:
+    """Whether a retained message is due to be dropped from the inboxes holding it.
+
+    Meaningless without ``retain`` — ``expires_at`` says when a filed copy
+    leaves the inbox, and a message the client never files has no filed copy —
+    so it is False there rather than being a second kind of end date.
+
+    An unreadable ``expires_at`` reads as "not expired", the same direction
+    ``decode_list`` fails in: a hand-edited row keeps being served rather than
+    silently vanishing from every inbox.
+    """
+    if not message.retain or message.expires_at is None:
+        return False
+    expires_at = parse_iso(message.expires_at)
+    return expires_at is not None and now >= expires_at
+
+
 def _in_list(allowed: Optional[List[str]], value: Optional[str]) -> bool:
     """Membership in a targeting list, where an absent list constrains nothing.
 
@@ -147,9 +174,7 @@ def matches(
     now: datetime,
 ) -> bool:
     """Whether this one message should be served to this one client."""
-    if not message.enabled:
-        return False
-    if not _within_window(message, now):
+    if not is_being_delivered(message, now):
         return False
     if not audience_matches(message, client):
         return False
@@ -157,8 +182,15 @@ def matches(
     # An ack suppresses the revision it names and every earlier one. Bumping
     # `revision` past it is what re-serves an edited message to someone who has
     # already seen the old wording.
+    #
+    # An expired message is the exception, and it is what makes revoking one
+    # honest. A client that has never held it must not *start* showing
+    # something whose inbox copy is already due to be dropped — it would show
+    # the message, file it, and prune it in the same breath. The refresh below
+    # only ever needed to reach the clients already holding it, so this costs
+    # that channel nothing.
     if acked_revision is None or acked_revision < message.revision:
-        return True
+        return not has_expired(message, now)
 
     # Acked at the current revision, so it has been seen. A **retained** message
     # keeps being served anyway, for as long as it is live.
@@ -177,6 +209,11 @@ def matches(
     #
     # Non-retained messages are shown once and dropped, so there is nothing to
     # refresh and they stop here as they always have.
+    #
+    # Note this stays true *after* the message expires, and has to: the past
+    # `expires_at` is the instruction, and a client only reads it out of a
+    # payload that still carries the message. It stops when the message stops
+    # being live, which is the operator's cue to disable it.
     return message.retain
 
 

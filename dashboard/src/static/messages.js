@@ -172,9 +172,16 @@ async function renderList() {
       const cells = COLUMNS.map(
         (c) => `<td class="${c.num ? "num" : ""}">${cell(row, c)}</td>`
       ).join("");
+      // Revoke is offered only where it does something Disable cannot: a
+      // message the client filed away. Everything else is shown once and
+      // dropped, so there is nothing left on the device to withdraw.
+      const revoke = row.retain
+        ? `<button data-act="revoke" data-id="${esc(row.message_id)}" class="secondary">Revoke</button>`
+        : "";
       const actions =
         `<td class="row-actions">` +
         `<button data-act="edit" data-id="${esc(row.message_id)}" class="secondary">Edit</button>` +
+        revoke +
         `<button data-act="toggle" data-id="${esc(row.message_id)}" class="secondary">${
           row.enabled ? "Disable" : "Enable"
         }</button>` +
@@ -203,6 +210,28 @@ async function rowAction(action, messageId) {
       method: "POST",
       body: JSON.stringify({ enabled: !row.enabled }),
     });
+    return renderList();
+  }
+
+  if (action === "revoke") {
+    // The one row action with preconditions the operator can fail — the
+    // message has to still be going out, or the withdrawal reaches nobody. The
+    // service decides that and says why, so its answer needs somewhere to land.
+    if (
+      !confirm(
+        `Revoke "${row.title}"? Clients drop it from their inbox on their next ` +
+          `poll. Leave it enabled until then — a revocation travels inside the ` +
+          `message, so disabling it now would strand it in every inbox holding it.`
+      )
+    ) {
+      return;
+    }
+    try {
+      await api(`/admin-api/messages/${messageId}/expire`, { method: "POST" });
+    } catch (err) {
+      $("#messages-note").textContent = err.message;
+      return;
+    }
     return renderList();
   }
 
@@ -586,11 +615,12 @@ const HELP = {
     "When a retained message should leave the client's local inbox. Blank means " +
       "never. Retention only — it has no relationship to Ends or to the " +
       "dismissal times, and is rejected outright without “Keep in the inbox”.",
-    "It is also how you clear a message from inboxes that already hold it — set " +
-      "it to now and leave everything else alone. Retained messages keep being " +
+    "Setting it to now is how you clear a message from inboxes that already " +
+      "hold it — but <strong>Revoke</strong> on the message's row does exactly " +
+      "that, and cannot get the details wrong. Retained messages keep being " +
       "sent, so clients pick the new value up on their next poll, within 15 " +
-      "minutes. Do not bump the revision (that re-shows it) or pull Ends back " +
-      "(that stops it reaching anyone).",
+      "minutes; do not bump the revision (that re-shows it) or pull Ends back " +
+      "(that strands it in every inbox holding it).",
   ],
   retain: [
     "Keep in the inbox",

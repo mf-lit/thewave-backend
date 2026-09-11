@@ -208,3 +208,31 @@ def test_update_clears_a_dismissal_delay_the_new_payload_omits(repository):
     )
     assert updated.dismissable_after is None
     assert updated.dismissable_at is None
+
+
+def test_expire_moves_only_the_expiry(repository):
+    """Revoking is one field: the kill switch and the window stay put.
+
+    They have to — the message keeps being delivered for a while yet, or the
+    clients holding it never hear that it has gone.
+    """
+    message = create(
+        repository,
+        display="inbox",
+        retain=True,
+        ends_at="2099-01-01T00:00:00Z",
+    )
+    assert message.expires_at is None
+
+    revoked = repository.expire(message.message_id)
+    assert revoked.expires_at is not None
+    assert revoked.expires_at == revoked.updated_at
+    # A bump re-shows a message, which is the opposite of revoking one.
+    assert revoked.revision == message.revision
+    assert revoked.enabled is True
+    assert revoked.ends_at == message.ends_at
+    assert revoked.title == message.title
+
+
+def test_expire_returns_none_for_an_unknown_id(repository):
+    assert repository.expire("nope") is None

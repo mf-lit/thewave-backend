@@ -163,6 +163,34 @@ class MessageRepository:
         logger.info("Set message %s enabled=%s", message_id, enabled)
         return self.get(message_id)
 
+    def expire(self, message_id: str) -> Optional[Message]:
+        """Revoke: tell every inbox holding this message to drop it, now.
+
+        Separate from ``update`` for the same reason ``set_enabled`` is —
+        retracting something should be one call, not a full rewrite assembled
+        from a form the operator never opened, where any field that got lost on
+        the way would be lost for good.
+
+        No revision bump, deliberately: a bump re-shows a message, and this is
+        the opposite of showing it. It leaves ``enabled`` and the window alone
+        for the same reason — the message has to keep being delivered for a
+        while yet, or the clients holding it never hear that it has gone.
+        """
+        now = clock.utc_now_iso()
+
+        with self.db.transaction() as conn:
+            cursor = conn.execute(
+                "UPDATE messages SET expires_at = ?, updated_at = ? "
+                "WHERE message_id = ?",
+                (now, now, message_id),
+            )
+            updated = cursor.rowcount
+
+        if not updated:
+            return None
+        logger.info("Revoked message %s (expires_at=%s)", message_id, now)
+        return self.get(message_id)
+
     def delete(self, message_id: str) -> bool:
         """Remove a message and the acks for it.
 

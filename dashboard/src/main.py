@@ -150,6 +150,12 @@ def admin_api_message_enabled(message_id):
     return jsonify(messages_api.set_enabled(message_id, bool(_body().get("enabled"))))
 
 
+@app.route("/admin-api/messages/<message_id>/expire", methods=["POST"])
+def admin_api_message_expire(message_id):
+    """Revoke a retained message from the inboxes holding it."""
+    return jsonify(messages_api.expire(message_id))
+
+
 @app.route("/admin-api/audience", methods=["POST"])
 def admin_api_audience():
     return jsonify(messages_api.audience(_body()))

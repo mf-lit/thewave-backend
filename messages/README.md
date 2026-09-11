@@ -124,6 +124,7 @@ these are served only over the Docker network.
 | `POST /admin/messages` | create → 201 |
 | `GET\|PUT\|DELETE /admin/messages/{id}` | read, rewrite, remove |
 | `POST /admin/messages/{id}/enabled` | the kill switch, body `{"enabled": bool}` |
+| `POST /admin/messages/{id}/expire` | revoke: `expires_at` ← now, no body, retained and live only |
 | `POST /admin/audience` | dry-run a draft's targeting rules → `{"count", "sample"}` |
 
 `PUT` rewrites every authored column — it is a replace, not a merge — and
@@ -179,7 +180,10 @@ A message is served to a client when **all** of these hold:
 - the caller's `days_count` is within `[min_days_count, max_days_count]`,
   inclusive;
 - the client has not acked it at the current `revision` — **unless it is
-  retained**, which keeps being served; see below.
+  retained**, which keeps being served; see below;
+- and, if it has been revoked (a retained message whose `expires_at` has
+  passed), the client is one that already holds it. The withdrawal has to
+  reach them; nobody else should be shown it.
 
 An empty list and a missing one mean the same thing — everyone — and are
 stored the same way, as NULL.
@@ -238,12 +242,35 @@ message is still arriving — without this, a retained message's expiry is fixed
 the moment a client files it, and "drop this from every inbox" is
 unimplementable.
 
-**To expire a retained message from inboxes that already hold it**, set
-`expires_at` to now and leave everything else alone. Do *not* bump the revision
-and do *not* pull `ends_at` back: the message has to stay live long enough for
-clients to poll and pick the new value up, which is one `ttl` — 15 minutes.
-`ends_at` is therefore the propagation window; if it has already passed, push
-it forward first.
+**To revoke a retained message from inboxes that already hold it**, click
+Revoke on its row in the dashboard, or:
+
+```
+POST /admin/messages/{id}/expire
+```
+
+It sets `expires_at` to now and changes nothing else — no revision bump (that
+re-shows a message, which is the opposite), and no touching `enabled` or
+`ends_at`, because the message has to stay live long enough for clients to poll
+and pick the new value up, which is one `ttl` — 15 minutes. `ends_at` is
+therefore the propagation window.
+
+The endpoint refuses the two cases where the instruction could not travel, both
+of which used to be silent mistakes:
+
+- **not retained** — the client never filed it, so there is nothing to
+  withdraw. Disable it instead.
+- **not being delivered** — disabled, or past its `ends_at`. Enable it or push
+  `ends_at` forward first, or every inbox holding it keeps it for good.
+
+An expired message is still served to the clients **holding** it, which is how
+they hear; it is no longer served to anyone else, so revoking does not go on
+showing it to people who had not yet seen it. `targeting.has_expired` is that
+line, and it is the reason Revoke is one click rather than a two-step dance
+with a fifteen-minute gap in the middle.
+
+To bring a revoked message back, move `expires_at` forward or clear it — not
+the revision, which would re-show it to everyone.
 
 `expires_at` is deliberately unconstrained by `ends_at` in either direction. It
 was once required to be at or after it, which forbade exactly this edit.

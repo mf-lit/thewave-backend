@@ -19,7 +19,13 @@ from src.api.auth import (
     MISSING_ADMIN_KEY_ERROR,
     MISSING_KEY_ERROR,
 )
-from src.api.routes import ACKS_FORMAT_ERROR, MISSING_CLIENT_ID_ERROR, NOT_FOUND_ERROR
+from src.api.routes import (
+    ACKS_FORMAT_ERROR,
+    MISSING_CLIENT_ID_ERROR,
+    NOT_FOUND_ERROR,
+    REVOKE_NEEDS_DELIVERY_ERROR,
+    REVOKE_NEEDS_RETAIN_ERROR,
+)
 from src.models import MessageRequest
 from src.services import Services
 from src.settings import Settings
@@ -292,6 +298,7 @@ def test_an_edit_does_not_re_show_by_default(client, admin_auth):
         ("put", "/admin/messages/nope"),
         ("delete", "/admin/messages/nope"),
         ("post", "/admin/messages/nope/enabled"),
+        ("post", "/admin/messages/nope/expire"),
     ],
 )
 def test_admin_not_found(client, admin_auth, method, path):
@@ -652,3 +659,81 @@ def test_expires_at_may_now_precede_ends_at(client, admin_auth):
     )
     assert response.status_code == 201
     assert response.get_json()["expires_at"] == "2026-10-02T09:00:00+00:00"
+
+
+# ---------------------------------------------------------- revoking in place
+
+
+def ack(client, message_id, revision=1, client_id=CLIENT_ID):
+    return client.post(
+        "/messages/acks",
+        json={"client_id": client_id,
+              "acks": [{"message_id": message_id, "revision": revision}]},
+        headers={"x-api-key": API_KEY},
+    )
+
+
+def test_revoke_reaches_a_holder_and_stops_reaching_everyone_else(client, services):
+    """The whole feature, end to end, from both sides of the ack.
+
+    A client holding the message must keep receiving it — the past expiry is
+    the instruction, and it only travels inside the message. A client that
+    never held it must stop receiving it, or revoking would go on showing the
+    message to everyone who had not yet seen it.
+    """
+    message = seed(services, title="Filed", retain=True, display="inbox")
+    ack(client, message.message_id)
+
+    response = client.post(
+        f"/admin/messages/{message.message_id}/expire",
+        headers={"x-admin-key": ADMIN_KEY},
+    )
+    assert response.status_code == 200
+    assert response.get_json()["expires_at"] is not None
+    assert response.get_json()["revision"] == 1, "a bump would re-show it"
+    assert response.get_json()["enabled"] is True, "it must keep being delivered"
+
+    holder = client.get("/messages", headers=headers(client_id=CLIENT_ID))
+    served = holder.get_json()["messages"]
+    assert [m["title"] for m in served] == ["Filed"]
+    assert served[0]["expires_at"] is not None, "the prune instruction"
+
+    newcomer = client.get("/messages", headers=headers(client_id=OTHER_ID))
+    assert newcomer.get_json()["messages"] == []
+
+
+def test_revoke_refuses_a_message_no_client_stored(client, services):
+    """Nothing to withdraw: a non-retained message was never filed anywhere."""
+    message = seed(services, retain=False)
+
+    response = client.post(
+        f"/admin/messages/{message.message_id}/expire",
+        headers={"x-admin-key": ADMIN_KEY},
+    )
+    assert response.status_code == 400
+    assert error(response) == REVOKE_NEEDS_RETAIN_ERROR
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"enabled": False},
+        {"ends_at": "2020-01-01T00:00:00Z", "starts_at": "2019-01-01T00:00:00Z"},
+        {"starts_at": "2099-01-01T00:00:00Z"},
+    ],
+)
+def test_revoke_refuses_a_message_that_is_not_being_delivered(client, services, overrides):
+    """A revocation travels inside the message. No delivery, no revocation.
+
+    This is the trap the README warns about: pulling `ends_at` back or throwing
+    the kill switch *first* leaves every inbox holding the message for good.
+    """
+    message = seed(services, retain=True, display="inbox", **overrides)
+
+    response = client.post(
+        f"/admin/messages/{message.message_id}/expire",
+        headers={"x-admin-key": ADMIN_KEY},
+    )
+    assert response.status_code == 400
+    assert error(response) == REVOKE_NEEDS_DELIVERY_ERROR
+    assert services.messages.get(message.message_id).expires_at is None
