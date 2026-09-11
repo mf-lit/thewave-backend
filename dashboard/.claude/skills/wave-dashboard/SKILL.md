@@ -204,9 +204,18 @@ the one page that is not backed by a SQLite read:
   operator holding all five in their head. The service rejects rather than
   ignores an inapplicable field, so `#expires-row` follows the Retain checkbox
   and `#dismissal-row` follows the Display select, and `retentionPayload()` /
-  `dismissalPayload()` send explicit nulls when hidden — otherwise a value left
+  `bannerPayload()` send explicit nulls when hidden — otherwise a value left
   over from before the operator changed either turns a save into a 400 with no
   visible cause. Any future conditional field wants the same pair of moves.
+- **Banner-only is wider than the time groups.** `banner_title` — the one line
+  a banner shows, with Title and Body kept for the tap-through — is not a time
+  but is rejected on a modal or an inbox entry just the same, so
+  `#banner-title-row` hides with the Display select and `bannerPayload()` nulls
+  it alongside the two dismissal fields. It is *required* on a banner, and the
+  form does not check that itself: the save fails with the service's wording,
+  because a second copy of the rule in JS is one that can disagree with it. The
+  Preview card draws the tapped-through message, so it deliberately shows the
+  Title even when a banner title is set — the help text says so.
 - **On and Status are different questions.** `On` is the `enabled` kill switch
   and nothing else; `Status` is `messageStatus()`, which combines the schedule,
   `retain` and `expires_at` with the current time — off / scheduled / live /

@@ -187,6 +187,18 @@ def test_dismissal_fields_round_trip(repository):
     assert stored.dismissable_after == "30s"
 
 
+def test_banner_title_round_trips_and_is_cleared_by_a_change_of_display(repository):
+    """The only way to clear it, now that a banner cannot be saved without one."""
+    message = create(repository, display="banner", banner_title="Closed today")
+    assert repository.get(message.message_id).banner_title == "Closed today"
+
+    updated = repository.update(
+        message.message_id,
+        MessageRequest.from_payload(make_payload(display="inbox")),
+    )
+    assert updated.banner_title is None
+
+
 def test_update_clears_a_dismissal_delay_the_new_payload_omits(repository):
     """A full rewrite: removing the delay from the form removes it from the row."""
     message = create(repository, display="banner", dismissable_after="5m")

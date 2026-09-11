@@ -97,9 +97,12 @@ behind an edge allow-list that admits only these paths.
 
 Reads `X-Client-ID` (required — 400 if absent or not a UUID), `X-Client-OS`
 and `X-Client-Version`. Each item carries `message_id`, `revision`, `title`,
-`body`, `display`, `level`, `retain`, `expires_at`, `action_url` and
-`action_label` — the message and how to show it, and nothing about who else
-got it. The response is `Cache-Control: no-store`.
+`banner_title`, `body`, `display`, `level`, `retain`, `expires_at`,
+`action_url`, `action_label`, `dismissable_at` and `dismissable_after` — the
+message and how to show it, and nothing about who else got it. The banner-only
+fields are sent on every message, null where they cannot apply, so the client
+reads one shape rather than branching on `display`. The response is
+`Cache-Control: no-store`.
 
 `POST /messages/acks` → `200 {"recorded": n}`
 
@@ -156,7 +159,8 @@ can be strict and small:
 - **Escapes**: `\\`, `\*`, `\[`, and nothing else. A bare `*` or `[` is a
   validation error, not literal text.
 - URLs must start with `https://`.
-- Limits: title ≤ 100 characters, body ≤ 2000, `action_label` ≤ 30.
+- Limits: title ≤ 100 characters, `banner_title` ≤ 100, body ≤ 2000,
+  `action_label` ≤ 30.
 
 The trap worth knowing: a list needs a blank line before it. `Closures:` on
 the line above two bullets makes one block whose lines do not *all* start with
@@ -282,3 +286,41 @@ holding — see `docs/dismissal-delay-client-change.md`. `dismissable_after` sto
 reason `notifications.time_before` does — the column has to mean something to
 whoever reads it in sqlite-web, and another unit can be added later without
 reinterpreting old rows.
+
+## Every banner says its own thing
+
+`banner_title` is what the banner shows in the one line it has. `title` and
+`body` are unchanged and are what the user reads on tapping through, so this is
+a shorter way of saying the same thing, not a second message — nothing is ever
+reachable only through it.
+
+| | Shown where |
+|---|---|
+| `banner_title` | The banner on the schedule screen — "Closed today" |
+| `title` + `body` | The message the banner opens — "Lagoon closed for maintenance until 6pm", and the detail |
+
+**Required on a banner, rejected on anything else.** Those two errors are the
+whole rule:
+
+- `banner_title is required for banner messages` — absent, null and blank are
+  one case, however the caller spells it.
+- `banner_title is only valid for banner messages` — a modal and an inbox entry
+  have nowhere to draw it, so storing one would be a silent no-op the operator
+  believes is on screen. The same reason the dismissal fields are banner-only.
+
+Requiring it is the point of the field. Falling back to `title` when it is
+missing would mean most banners quietly kept showing a title written for a
+dialog, which is the thing this exists to stop; making it a decision the
+operator has to take is what changes that. The column stays nullable because a
+modal has to store *something*, and NULL is that something.
+
+Migration 3 backfills existing banners with their own `title`, so the rule holds
+of the rows already in the file and not only of the ones written next. That
+copies exactly what those banners already displayed — it changes no behaviour,
+it moves a fallback out of the client and into the data.
+
+Bounded by the same 100 characters as `title` rather than a shorter limit of its
+own: it stands in for the title, so it can never need more room than one, and a
+second number would only be a guess at how much of a line the client has.
+Brevity is the point of the field, but it is the operator's judgement and the
+compose form's prompting, not a rule. See `docs/banner-title-client-change.md`.

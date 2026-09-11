@@ -100,6 +100,7 @@ def test_get_messages_serves_the_client_shape_and_a_ttl(client, services):
         "message_id",
         "revision",
         "title",
+        "banner_title",
         "body",
         "display",
         "level",
@@ -535,6 +536,60 @@ def test_admin_round_trips_the_delay(client, admin_auth):
     )
     assert created.status_code == 201
     assert created.get_json()["dismissable_after"] == "5m"
+
+
+# ------------------------------------------------------------- banner title
+
+
+def test_a_banner_title_reaches_the_client_alongside_the_title(client, services):
+    """Both are served: the banner draws one, the click-through the other."""
+    seed(
+        services,
+        display="banner",
+        title="Lagoon closed for maintenance",
+        banner_title="Closed today",
+    )
+
+    message = client.get("/messages", headers=headers()).get_json()["messages"][0]
+    assert message["banner_title"] == "Closed today"
+    assert message["title"] == "Lagoon closed for maintenance"
+
+
+def test_banner_title_is_null_rather_than_absent(client, services):
+    """One shape for the client to read; null means "show the title"."""
+    seed(services, display="modal")
+
+    message = client.get("/messages", headers=headers()).get_json()["messages"][0]
+    assert message["banner_title"] is None
+
+
+def test_admin_rejects_a_banner_without_one(client, admin_auth):
+    payload = make_payload(display="banner")
+    del payload["banner_title"]
+
+    response = client.post("/admin/messages", json=payload, headers=admin_auth)
+    assert response.status_code == 400
+    assert error(response) == "banner_title is required for banner messages"
+
+
+def test_admin_rejects_a_banner_title_on_a_modal(client, admin_auth):
+    response = client.post(
+        "/admin/messages",
+        json=make_payload(display="modal", banner_title="Closed today"),
+        headers=admin_auth,
+    )
+    assert response.status_code == 400
+    assert error(response) == "banner_title is only valid for banner messages"
+
+
+def test_admin_round_trips_a_banner_title(client, admin_auth):
+    created = client.post(
+        "/admin/messages",
+        json=make_payload(display="banner", banner_title="  Closed today  "),
+        headers=admin_auth,
+    )
+    assert created.status_code == 201
+    assert created.get_json()["banner_title"] == "Closed today"
 
 
 # --------------------------------------- expiring a retained message in place

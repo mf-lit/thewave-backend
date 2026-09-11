@@ -303,17 +303,30 @@ def test_a_dismissable_at_beyond_the_window_is_allowed():
 
 @pytest.mark.parametrize("display", ["modal", "inbox"])
 @pytest.mark.parametrize("field, value", [("dismissable_at", "2026-10-01T09:00:00Z"),
-                                          ("dismissable_after", "30s")])
-def test_dismissal_fields_are_rejected_on_other_display_types(display, field, value):
+                                          ("dismissable_after", "30s"),
+                                          ("banner_title", "Closed today")])
+def test_banner_only_fields_are_rejected_on_other_display_types(display, field, value):
     """Rejected, not ignored — a silently dropped delay is one nobody sees fail."""
-    rejects(models._dismissal_only_error(field), display=display, **{field: value})
+    rejects(models._banner_only_error(field), display=display, **{field: value})
+
+
+def test_every_banner_only_field_is_covered_by_that_rule():
+    """The list the check loops over, so a new field cannot be added past it."""
+    assert set(models.BANNER_ONLY_FIELDS) == {
+        "dismissable_at",
+        "dismissable_after",
+        "banner_title",
+    }
 
 
 @pytest.mark.parametrize("display", ["modal", "inbox"])
 def test_an_explicit_null_is_accepted_on_other_display_types(display):
     """A serialiser that emits nulls for absent fields is not a client bug."""
-    request = build(display=display, dismissable_at=None, dismissable_after=None)
+    request = build(
+        display=display, dismissable_at=None, dismissable_after=None, banner_title=None
+    )
     assert request.dismissable_at is None
+    assert request.banner_title is None
 
 
 def test_both_may_be_set_together():
@@ -328,3 +341,58 @@ def test_both_may_be_set_together():
 )
 def test_duration_seconds_never_raises_on_a_hand_edited_row(value, expected):
     assert models.duration_seconds(value) == expected
+
+
+# ------------------------------------------------------------- banner title
+
+
+def test_a_banner_must_carry_one():
+    """The other half of the banner-only rule: required here, rejected elsewhere.
+
+    Composing a banner is then a decision about what the banner says, rather
+    than an omission that falls back to a title written for a dialog.
+    """
+    payload = make_payload(display="banner")
+    del payload["banner_title"]
+    with pytest.raises(ValidationError) as excinfo:
+        MessageRequest.from_payload(payload)
+    assert str(excinfo.value) == models.BANNER_TITLE_REQUIRED_ERROR
+
+
+@pytest.mark.parametrize("value", [None, "", "   "])
+def test_null_and_blank_are_the_same_omission(value):
+    """However a client spells "not written", it is the one case.
+
+    Blank still normalises to None on the way through, so nothing can store a
+    `''` that a reader in sqlite-web has to know means the same as NULL.
+    """
+    rejects(models.BANNER_TITLE_REQUIRED_ERROR, display="banner", banner_title=value)
+
+
+def test_banner_title_is_stripped():
+    assert banner(banner_title="  Closed today  ").banner_title == "Closed today"
+
+
+@pytest.mark.parametrize("value", [7, True, [], {"text": "hi"}])
+def test_banner_title_must_be_a_string(value):
+    rejects("banner_title must be a string", display="banner", banner_title=value)
+
+
+def test_banner_title_is_bounded_by_the_title_limit():
+    """It stands in for the title, so it can never need more room than one."""
+    assert (
+        banner(banner_title="x" * models.MAX_TITLE_LENGTH).banner_title
+        == "x" * models.MAX_TITLE_LENGTH
+    )
+    rejects(
+        models._length_error("banner_title", models.MAX_TITLE_LENGTH),
+        display="banner",
+        banner_title="x" * (models.MAX_TITLE_LENGTH + 1),
+    )
+
+
+def test_banner_title_does_not_replace_the_title():
+    """Both are stored: the banner shows one, the click-through shows the other."""
+    request = banner(title="Lagoon closed for maintenance", banner_title="Closed today")
+    assert request.title == "Lagoon closed for maintenance"
+    assert request.banner_title == "Closed today"

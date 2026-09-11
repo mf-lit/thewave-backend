@@ -102,8 +102,11 @@ def build_upstream_db(
 def make_payload(**overrides: Any) -> Dict[str, Any]:
     """A minimal valid ``POST /admin/messages`` body, with fields overridden.
 
-    Only the three required fields, so a test that overrides one of the
-    optional ones is testing that field and nothing else.
+    Only the required fields, so a test that overrides one of the optional ones
+    is testing that field and nothing else. ``banner_title`` is one of them on a
+    banner and rejected on anything else, so it follows whichever ``display``
+    the caller ends up with — and a test that passes it explicitly, null
+    included, keeps what it passed.
     """
     payload: Dict[str, Any] = {
         "title": "Lagoon closed Tuesday",
@@ -111,6 +114,8 @@ def make_payload(**overrides: Any) -> Dict[str, Any]:
         "display": "banner",
     }
     payload.update(overrides)
+    if payload.get("display") == "banner":
+        payload.setdefault("banner_title", "Closed today")
     return payload
 
 

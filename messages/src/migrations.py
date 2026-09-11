@@ -102,9 +102,31 @@ def _migration_002_dismissal_delay(conn: sqlite3.Connection) -> None:
     _add_column_if_missing(conn, "messages", "dismissable_after", "TEXT")
 
 
+def _migration_003_banner_title(conn: sqlite3.Connection) -> None:
+    """The line a banner shows, which is required of every new banner.
+
+    The column stays nullable — a modal and an inbox entry have nowhere to draw
+    one — but ``models`` will not accept a banner without it, so the backfill
+    below is what makes that true of the rows already here rather than only of
+    the ones written next.
+
+    Copying ``title`` is exactly what those banners already displayed, so this
+    changes no behaviour; it moves a fallback out of the client and into the
+    data. It is the one data write in this file, and it does not break the
+    additive-only rule: the column it writes was created three lines above and
+    holds nothing.
+    """
+    _add_column_if_missing(conn, "messages", "banner_title", "TEXT")
+    conn.execute(
+        "UPDATE messages SET banner_title = title "
+        "WHERE display = 'banner' AND (banner_title IS NULL OR banner_title = '')"
+    )
+
+
 MIGRATIONS: List[Tuple[int, Callable[[sqlite3.Connection], None]]] = [
     (1, _migration_001_baseline),
     (2, _migration_002_dismissal_delay),
+    (3, _migration_003_banner_title),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]

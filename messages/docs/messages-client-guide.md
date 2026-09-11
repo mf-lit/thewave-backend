@@ -46,6 +46,7 @@ Headers: `x-api-key`, `X-Client-ID` (**required**), `X-Client-OS`,
       "message_id": "ab62dbeb-…",
       "revision": 1,
       "title": "Lagoon closed Tuesday",
+      "banner_title": null,
       "body": "Closed for **maintenance**.\n\n- morning\n- afternoon",
       "display": "modal",
       "level": "info",
@@ -157,11 +158,39 @@ A non-retained message still stops dead at its ack, exactly as before.
 | `display` | Behaviour |
 |---|---|
 | `modal` | A dialog, at most **one per foreground**. Show the first in the list; send the rest to the inbox. |
-| `banner` | Inline on the schedule screen. |
+| `banner` | Inline on the schedule screen. Draws `banner_title`, which every banner has — see below. |
 | `inbox` | List only — never interrupts. |
 
 `level` is `info` or `warning` and is styling only: a warning is more prominent,
 not more blocking.
+
+### Every banner carries its own, shorter title
+
+> Also covered on its own in `banner-title-client-change.md`, for an agent
+> already implementing from this guide when the field landed. The two say the
+> same thing — change them together.
+
+`banner_title` is what the **banner line** should say; `title` and `body` are
+unchanged and are what the user reads when they tap through.
+
+```
+banner line   :  banner_title
+tapped through:  title + body   (always, even when banner_title is set)
+```
+
+It is **always set on a banner** — the server will not accept one without it,
+and the banners that predate the field were backfilled with their own `title` —
+and **always null on a modal or an inbox entry**, which have nowhere to draw it.
+So it is present on every message and you never branch on `display` to know
+which keys exist.
+
+Still write it as `banner_title ?? title`. It costs a line, `title` is never
+null, and it is the difference between a bad banner and a crash if a row ever
+reaches you without one.
+
+Nothing is ever reachable *only* through `banner_title`: it is a shorter way of
+saying what the title says, so a client that showed only the title would still
+show a correct, complete message. Both are at most 100 characters.
 
 ### Banners that cannot be dismissed yet
 
@@ -226,7 +255,10 @@ rejects anything outside this grammar**, so your parser can be strict and small
   emphasis run are plain text.
 - **Escapes**: `\\`, `\*`, `\[`, and nothing else.
 - URLs always start with `https://`.
-- Limits: `title` ≤ 100 characters, `body` ≤ 2000, `action_label` ≤ 30.
+- Limits: `title` ≤ 100 characters, `banner_title` ≤ 100, `body` ≤ 2000,
+  `action_label` ≤ 30.
+- `title` and `banner_title` are **plain text**, not markdown. Only `body` is
+  parsed.
 
 **Do not add `flutter_markdown`.** The grammar is six constructs; a hand-written
 `TextSpan` builder is smaller than the dependency and cannot render something
@@ -289,9 +321,11 @@ them as assertions, not as messages to surface to the user.
 5. A local inbox for `retain: true`, pruned on `expires_at` — refreshing the
    stored copy on every poll, since retained messages keep arriving.
 6. One modal per foreground, in the order served; the rest to the inbox.
-7. For a banner with either dismissal field set, hide the dismiss control until
+7. Banners draw `banner_title` (`?? title` defensively — every banner has one);
+   the message they open still shows `title` and `body`.
+8. For a banner with either dismissal field set, hide the dismiss control until
    `min(dismissable_at, first_shown_at + dismissable_after)`, persisting
    `first_shown_at` so backgrounding does not restart the countdown.
-8. Poll on startup and resume, throttled by `ttl`.
-9. Verify on web, not just on device — the `X-Client-ID`-on-acks requirement
-   only bites there.
+9. Poll on startup and resume, throttled by `ttl`.
+10. Verify on web, not just on device — the `X-Client-ID`-on-acks requirement
+    only bites there.

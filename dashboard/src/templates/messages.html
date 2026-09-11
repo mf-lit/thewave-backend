@@ -21,6 +21,14 @@
         <input type="text" id="f-title" maxlength="100" placeholder="Lagoon closed Tuesday">
       </label>
 
+      <!-- Required on a banner and rejected on anything else, so it follows the
+           Display select the way the Interaction group does. -->
+      <label id="banner-title-row" hidden>
+        <span class="lbl">Banner title <span class="sub">what the banner itself says · required</span>
+          <button type="button" class="help" data-help="banner_title">?</button></span>
+        <input type="text" id="f-banner-title" maxlength="100" placeholder="Closed today">
+      </label>
+
       <label>
         <span class="lbl">Body <button type="button" class="help" data-help="body">?</button></span>
         <textarea id="f-body" rows="8" placeholder="The lagoon is closed for **maintenance**."></textarea>

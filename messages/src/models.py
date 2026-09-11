@@ -62,8 +62,24 @@ DAYS_COUNT_ORDER_ERROR = "min_days_count must not be greater than max_days_count
 # no-op — the operator would set a delay, see it stored, and never see it work.
 DISMISSAL_FIELDS: Tuple[str, ...] = ("dismissable_at", "dismissable_after")
 
+# What a banner shows in the one line it has, standing in for `title` there.
+# `title` and `body` stay what the user reads on tapping through, so this is a
+# shorter way of saying the same thing and not a second message — nothing here
+# is only reachable through it.
+#
+# Banner-only for the same reason the dismissal pair is: a modal and an inbox
+# entry have nowhere to draw it, so storing one would be a silent no-op.
+BANNER_ONLY_FIELDS: Tuple[str, ...] = DISMISSAL_FIELDS + ("banner_title",)
+
 _DURATION_UNITS = {"s": 1, "m": 60, "h": 3600}
 _DURATION = re.compile(r"^(\d+)([smh])$")
+
+# The other half of the banner-title rule: required on a banner, rejected
+# everywhere else. Requiring it is what stops a banner falling back to a title
+# written for a dialog — the fallback the client applies to rows that predate
+# the column, and which no new message should have to rely on. The two errors
+# are worded as a pair, because between them they are the whole rule.
+BANNER_TITLE_REQUIRED_ERROR = "banner_title is required for banner messages"
 
 DISMISSABLE_AFTER_FORMAT_ERROR = (
     "Invalid dismissable_after. Expected a whole number of seconds, minutes or "
@@ -77,7 +93,7 @@ EXPIRES_NEEDS_RETAIN_ERROR = (
 )
 
 
-def _dismissal_only_error(field: str) -> str:
+def _banner_only_error(field: str) -> str:
     return f"{field} is only valid for banner messages"
 
 
@@ -140,6 +156,28 @@ def _required_text(payload: Dict[str, Any], field: str, limit: int) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValidationError(f"{field} is required and must be a string")
     value = value.strip()
+    if len(value) > limit:
+        raise ValidationError(_length_error(field, limit))
+    return value
+
+
+def _optional_text(payload: Dict[str, Any], field: str, limit: int) -> Optional[str]:
+    """A length-bounded string field that may be absent, null or blank.
+
+    Shape only: absent, null and blank all come back as None, and whether that
+    is allowed is the caller's question. One stored representation for one
+    meaning is the rule ``_string_list`` follows for the same reason — a NULL
+    and a `""` that a reader in sqlite-web has to know are the same is a worse
+    table to read.
+    """
+    value = payload.get(field)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValidationError(f"{field} must be a string")
+    value = value.strip()
+    if not value:
+        return None
     if len(value) > limit:
         raise ValidationError(_length_error(field, limit))
     return value
@@ -351,6 +389,7 @@ class Message:
     updated_at: str
     dismissable_at: Optional[str] = None
     dismissable_after: Optional[str] = None
+    banner_title: Optional[str] = None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "Message":
@@ -379,6 +418,7 @@ class Message:
             updated_at=row["updated_at"],
             dismissable_at=row["dismissable_at"],
             dismissable_after=row["dismissable_after"],
+            banner_title=row["banner_title"],
         )
 
     def to_api(self) -> Dict[str, Any]:
@@ -390,11 +430,17 @@ class Message:
         has no use for. ``retain`` and ``expires_at`` are here because the
         client acts on them — they decide how long the message stays in the
         inbox once read.
+
+        Every banner-only field is sent on every message, null where it cannot
+        apply, so the client reads one shape rather than branching on
+        ``display`` to know which keys exist. ``banner_title`` is the one that
+        is never null on a banner, since a banner cannot be written without it.
         """
         return {
             "message_id": self.message_id,
             "revision": self.revision,
             "title": self.title,
+            "banner_title": self.banner_title,
             "body": self.body,
             "display": self.display,
             "level": self.level,
@@ -402,9 +448,6 @@ class Message:
             "expires_at": self.expires_at,
             "action_url": self.action_url,
             "action_label": self.action_label,
-            # Always sent, null on the types that cannot use them, so the client
-            # reads one shape rather than branching on `display` to know which
-            # keys exist.
             "dismissable_at": self.dismissable_at,
             "dismissable_after": self.dismissable_after,
         }
@@ -414,6 +457,7 @@ class Message:
         return {
             "message_id": self.message_id,
             "title": self.title,
+            "banner_title": self.banner_title,
             "body": self.body,
             "client_ids": self.client_ids,
             "os": self.os,
@@ -463,6 +507,7 @@ class MessageRequest:
     action_label: Optional[str] = None
     dismissable_at: Optional[str] = None
     dismissable_after: Optional[str] = None
+    banner_title: Optional[str] = None
 
     @classmethod
     def from_payload(cls, payload: Dict[str, Any]) -> "MessageRequest":
@@ -540,11 +585,12 @@ class MessageRequest:
         # way notifications rejects a day filter on a type that names one
         # session. A silently dropped delay is a delay the operator believes is
         # in force, and the only way to find out otherwise is a user dismissing
-        # something they were not meant to be able to.
+        # something they were not meant to be able to; a silently dropped
+        # banner title is wording the operator believes is on screen.
         if display != DISPLAY_BANNER:
-            for name in DISMISSAL_FIELDS:
+            for name in BANNER_ONLY_FIELDS:
                 if payload.get(name) is not None:
-                    raise ValidationError(_dismissal_only_error(name))
+                    raise ValidationError(_banner_only_error(name))
 
         dismissable_at = _timestamp(payload, "dismissable_at")
         dismissable_after = (
@@ -552,6 +598,19 @@ class MessageRequest:
             if payload.get("dismissable_after") is None
             else normalize_duration(payload["dismissable_after"])
         )
+        # Required on a banner, so composing one is a decision about what the
+        # banner says rather than an omission that silently falls back to a
+        # title written for a dialog. Absent, null and blank are one case: the
+        # operator has not written the line, however their client spells it.
+        #
+        # Bounded by the same 100 as `title` rather than a shorter limit of its
+        # own: it stands in for the title, so it can never need more room than
+        # one, and inventing a second number would only be a guess at how much
+        # of a line the client has. Brevity is what the field is for, but it is
+        # the operator's judgement and the compose form's prompting, not a rule.
+        banner_title = _optional_text(payload, "banner_title", MAX_TITLE_LENGTH)
+        if display == DISPLAY_BANNER and banner_title is None:
+            raise ValidationError(BANNER_TITLE_REQUIRED_ERROR)
 
         action_url = payload.get("action_url")
         action_label = payload.get("action_label")
@@ -580,5 +639,6 @@ class MessageRequest:
             action_label=action_label,
             dismissable_at=dismissable_at,
             dismissable_after=dismissable_after,
+            banner_title=banner_title,
             **targeting,
         )

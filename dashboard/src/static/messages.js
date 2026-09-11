@@ -228,6 +228,7 @@ function openCompose(row) {
   $("#f-bump-revision").checked = false;
 
   $("#f-title").value = row ? row.title : "";
+  $("#f-banner-title").value = row && row.banner_title ? row.banner_title : "";
   $("#f-body").value = row ? row.body : "";
   $("#f-display").value = row ? row.display : "banner";
   $("#f-level").value = row ? row.level : "info";
@@ -293,6 +294,12 @@ function targetingPayload() {
 // condition and sends explicit nulls when hidden. Otherwise a value left over
 // from before the operator changed Display or Retain turns a save into a 400
 // with no visible cause.
+//
+// `banner_title` is not a time, but it is banner-only and rejected the same
+// way, so it rides the same pair of moves: hidden with the Display select, and
+// nulled in the payload when it is. It is also *required* on a banner — the
+// save fails with the service's own wording, which is the right place for it
+// to fail: a second copy of the rule here is one that can disagree.
 
 function isBanner() {
   return $("#f-display").value === "banner";
@@ -303,13 +310,17 @@ function isRetained() {
 }
 
 function updateGroupVisibility() {
+  $("#banner-title-row").hidden = !isBanner();
   $("#dismissal-row").hidden = !isBanner();
   $("#expires-row").hidden = !isRetained();
 }
 
-function dismissalPayload() {
-  if (!isBanner()) return { dismissable_at: null, dismissable_after: null };
+function bannerPayload() {
+  if (!isBanner()) {
+    return { banner_title: null, dismissable_at: null, dismissable_after: null };
+  }
   return {
+    banner_title: textOrNull("#f-banner-title"),
     dismissable_at: textOrNull("#f-dismissable-at"),
     dismissable_after: textOrNull("#f-dismissable-after"),
   };
@@ -334,7 +345,7 @@ function composePayload() {
     action_url: textOrNull("#f-action-url"),
     action_label: textOrNull("#f-action-label"),
     ...retentionPayload(),
-    ...dismissalPayload(),
+    ...bannerPayload(),
     ...targetingPayload(),
   };
 
@@ -621,6 +632,19 @@ const HELP = {
     "Client IDs",
     "Comma-separated client UUIDs — the way to try a message on your own device " +
       "before it goes out. Blank means everyone matching the other rules.",
+  ],
+  banner_title: [
+    "Banner title",
+    "What the banner itself says, in the one line it has — the Title and Body " +
+      "are what the user reads after tapping it. <strong>Required on a " +
+      "banner</strong>, and rejected on a modal or an inbox message, which " +
+      "have nowhere to draw it.",
+    "Write the short one here and the full one in Title: <em>Closed today</em> " +
+      "on the schedule screen, <em>Lagoon closed for maintenance until 6pm</em> " +
+      "when they open it. It is required precisely so a banner does not end up " +
+      "showing a title written for a dialog.",
+    "Same 100-character limit as the Title, but the point is to be shorter. " +
+      "The Preview shows the tapped-through message, not the banner line.",
   ],
   dismissable_at: [
     "Dismissable at",

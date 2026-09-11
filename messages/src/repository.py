@@ -24,7 +24,7 @@ _COLUMNS = """
     message_id, title, body, client_ids, os, min_version, max_version,
     min_days_count, max_days_count, starts_at, ends_at, retain, expires_at,
     display, level, priority, action_url, action_label, enabled, revision,
-    created_at, updated_at, dismissable_at, dismissable_after
+    created_at, updated_at, dismissable_at, dismissable_after, banner_title
 """
 
 _SELECT = f"SELECT {_COLUMNS} FROM messages"
@@ -57,6 +57,7 @@ def _authored_values(request: MessageRequest) -> Tuple:
         int(request.enabled),
         request.dismissable_at,
         request.dismissable_after,
+        request.banner_title,
     )
 
 
@@ -100,8 +101,9 @@ class MessageRepository:
                     max_version, min_days_count, max_days_count, starts_at,
                     ends_at, retain, expires_at, display, level, priority,
                     action_url, action_label, enabled, dismissable_at,
-                    dismissable_after, revision, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                    dismissable_after, banner_title, revision, created_at,
+                    updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                 """,
                 (message_id, *_authored_values(request), now, now),
             )
@@ -131,7 +133,7 @@ class MessageRepository:
                     expires_at = ?, display = ?, level = ?, priority = ?,
                     action_url = ?, action_label = ?, enabled = ?,
                     dismissable_at = ?, dismissable_after = ?,
-                    revision = revision + ?, updated_at = ?
+                    banner_title = ?, revision = revision + ?, updated_at = ?
                 WHERE message_id = ?
                 """,
                 (*_authored_values(request), int(bump_revision), now, message_id),
