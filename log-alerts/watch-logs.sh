@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Configuration via environment variables
-WIREPUSHER_ID="${WIREPUSHER_ID:?WIREPUSHER_ID is required}"
-WIREPUSHER_TYPE="${WIREPUSHER_TYPE:-log-alert}"
+PUSHOVER_TOKEN="${PUSHOVER_TOKEN:?PUSHOVER_TOKEN is required}"
+PUSHOVER_USER_KEY="${PUSHOVER_USER_KEY:?PUSHOVER_USER_KEY is required}"
 LOG_PATTERN="${LOG_PATTERN:-error|exception|fatal|panic}"
 CONTAINERS="${CONTAINERS:-}"  # empty = all containers
 COOLDOWN="${COOLDOWN:-60}"    # seconds between duplicate alerts
@@ -17,11 +17,12 @@ send_alert() {
   local container="$1"
   local msg="${2:0:500}"
 
-  curl -sf -G "https://wirepusher.com/send" \
-    --data-urlencode "id=$WIREPUSHER_ID" \
-    --data-urlencode "title=🚨 $container" \
-    --data-urlencode "message=$msg" \
-    --data-urlencode "type=$WIREPUSHER_TYPE" \
+  curl -sf \
+    --form-string "token=$PUSHOVER_TOKEN" \
+    --form-string "user=$PUSHOVER_USER_KEY" \
+    --form-string "title=🚨 $container" \
+    --form-string "message=$msg" \
+    https://api.pushover.net/1/messages.json \
     > /dev/null 2>&1 || echo "[log-alerter] Failed to send alert"
 }
 
@@ -67,7 +68,7 @@ watch_container() {
 }
 
 echo "[log-alerter] Starting log watcher..."
-echo "[log-alerter] WirePusher ID: ${WIREPUSHER_ID:0:4}..."
+echo "[log-alerter] Pushover user: ${PUSHOVER_USER_KEY:0:4}..."
 echo "[log-alerter] Pattern: $LOG_PATTERN"
 echo "[log-alerter] Cooldown: ${COOLDOWN}s"
 
