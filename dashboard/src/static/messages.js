@@ -32,7 +32,7 @@ function debounce(fn, ms) {
 }
 
 async function api(path, options = {}) {
-  const res = await fetch(path, {
+  const res = await fetch(SCRIPT_ROOT + path, {
     headers: { "Content-Type": "application/json" },
     ...options,
   });

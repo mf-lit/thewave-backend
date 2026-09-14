@@ -30,7 +30,7 @@ function applyDefaultDateRange() {
 
 async function getJSON(path, params) {
   const qs = params ? "?" + params.toString() : "";
-  const res = await fetch(path + qs);
+  const res = await fetch(SCRIPT_ROOT + path + qs);
   if (!res.ok) throw new Error(`${path} -> ${res.status}`);
   return res.json();
 }

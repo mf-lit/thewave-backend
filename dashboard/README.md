@@ -42,6 +42,26 @@ uv run flask --app src.main run --port 5002
 Then open <http://localhost:5002/>. No environment setup is needed — `src/config.py` defaults to the
 real DB paths above. Override with `UPSTREAM_DB_PATH` / `NOTIFICATIONS_DB_PATH` if needed.
 
+## Behind a reverse proxy
+
+The app can be mounted under a path prefix, e.g. `https://some.proxy.local/wave-dashboard/`,
+while still answering at `/` on `${TAILSCALE_IP}:5002`. The proxy names the prefix in
+`X-Forwarded-Prefix`; `ProxyFix` in `main.py` turns it into `SCRIPT_NAME`, which `url_for`
+and the JS fetch helpers (via `SCRIPT_ROOT`) pick up. Nothing in this repo names the prefix.
+
+```nginx
+location = /wave-dashboard { return 301 /wave-dashboard/; }
+location /wave-dashboard/ {
+    proxy_pass http://<dashboard-tailscale-host>:5002/;   # trailing / strips the prefix
+    proxy_set_header X-Forwarded-Prefix /wave-dashboard;
+    proxy_set_header X-Forwarded-For    $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto  $scheme;
+}
+```
+
+The dashboard has no auth of its own — tailnet membership is the access control, and the
+Messages page writes. Only put it behind a proxy that is itself reachable only from the tailnet.
+
 ## Layout
 
 ```

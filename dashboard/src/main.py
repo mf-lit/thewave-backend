@@ -8,11 +8,16 @@ Run locally with:
 
 from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from . import queries
 from .messages_api import MessagesApi, MessagesApiError
 
 app = Flask(__name__)
+# Behind the tailnet nginx proxy, X-Forwarded-Prefix becomes SCRIPT_NAME so
+# url_for and request.script_root carry /wave-dashboard. Direct requests send
+# no header and stay at /.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_prefix=1)
 # Scoped to /api/*, which is read-only. The /admin-api/* routes below create,
 # edit and delete broadcast messages, and a cross-origin page must not be able
 # to preflight its way into them just because the operator is on the Tailnet.

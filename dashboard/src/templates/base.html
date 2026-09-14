@@ -18,6 +18,9 @@
   <main>
     {% block content %}{% endblock %}
   </main>
+  {# Where the app is mounted: "" when reached directly, "/wave-dashboard"
+     behind the proxy. The page scripts' fetch helpers prepend it. #}
+  <script>const SCRIPT_ROOT = {{ request.script_root|tojson }};</script>
   {# Each page loads its own script: dashboard.js reaches for elements that
      only exist on the clients page, so it must not run on the others. #}
   {% block scripts %}

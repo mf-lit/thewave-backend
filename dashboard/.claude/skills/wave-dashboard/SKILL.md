@@ -242,4 +242,8 @@ the one page that is not backed by a SQLite read:
 - All SQL goes in `queries.py`; validate any user-supplied sort/column against an allow-list before
   interpolating it into SQL (everything else uses bound `?` params).
 - Endpoints return plain JSON; the frontend owns all formatting.
+- The app may be mounted under a proxy prefix (`/wave-dashboard/`, see README). Template URLs
+  use `url_for`, and every request goes through `getJSON` (`dashboard.js`) or `api`
+  (`messages.js`), which prepend `SCRIPT_ROOT` from `base.html`. Never `fetch` a bare `/path`
+  or hard-code one in a link — it works directly on :5002 and breaks behind the proxy.
 - This is its own git repo — keep everything self-contained here.
